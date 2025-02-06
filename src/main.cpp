@@ -129,9 +129,9 @@ void loop() {
 
   // Encode brightnesses for each port
   // cli(); // might need
-  BCM_encode(brightnesses, 'B', b_pins, num_b_pins);                            // PORTB
-  BCM_encode(brightnesses + num_b_pins, 'C', c_pins, num_c_pins);               // PORTC
-  BCM_encode(brightnesses + num_b_pins + num_c_pins, 'D', d_pins, num_d_pins);  // PORTD
+  BCM_encode(brightnesses, 'B', LED_PORTB_PINS, NUM_LED_PORTB_PINS);                            // PORTB
+  BCM_encode(brightnesses + NUM_LED_PORTB_PINS, 'C', LED_PORTC_PINS, NUM_LED_PORTC_PINS);               // PORTC
+  BCM_encode(brightnesses + NUM_LED_PORTB_PINS + NUM_LED_PORTC_PINS, 'D', LED_PORTD_PINS, NUM_LED_PORTD_PINS);  // PORTD
                                                                                 // sei(); // might need
 
   // TODO: set this to a timer, could idle sleep in between

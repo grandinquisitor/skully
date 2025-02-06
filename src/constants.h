@@ -52,12 +52,12 @@ constexpr uint8_t led_to_map[NUM_LEDS] = {
 };
 
 // optimize this with bit masks
-constexpr uint8_t num_b_pins = 8;
-constexpr uint8_t num_c_pins = 4;
-constexpr uint8_t num_d_pins = 6;
-constexpr uint8_t b_pins[num_b_pins] = {0, 1, 2, 3, 4, 5, 6, 7};
-constexpr uint8_t c_pins[num_c_pins] = {0, 1, 2, 3};
-constexpr uint8_t d_pins[num_d_pins] = {0, 3, 4, 5, 6, 7};
+constexpr uint8_t NUM_LED_PORTB_PINS = 8;
+constexpr uint8_t NUM_LED_PORTC_PINS = 4;
+constexpr uint8_t NUM_LED_PORTD_PINS = 6;
+constexpr uint8_t LED_PORTB_PINS[NUM_LED_PORTB_PINS] = {0, 1, 2, 3, 4, 5, 6, 7};
+constexpr uint8_t LED_PORTC_PINS[NUM_LED_PORTC_PINS] = {0, 1, 2, 3};
+constexpr uint8_t LED_PORTD_PINS[NUM_LED_PORTD_PINS] = {0, 3, 4, 5, 6, 7};
 
 constexpr uint8_t make_bitmap(const uint8_t* arr, uint8_t len) {
   uint8_t bm = 0;
@@ -67,9 +67,9 @@ constexpr uint8_t make_bitmap(const uint8_t* arr, uint8_t len) {
   return bm;
 }
 
-constexpr uint8_t port_b_bm = make_bitmap(b_pins, num_b_pins);
-constexpr uint8_t port_c_bm = make_bitmap(c_pins, num_c_pins);
-constexpr uint8_t port_d_bm = make_bitmap(d_pins, num_d_pins);
+constexpr uint8_t LED_PORTB_PIN_BM = make_bitmap(LED_PORTB_PINS, NUM_LED_PORTB_PINS);
+constexpr uint8_t LED_PORTC_PIN_BM = make_bitmap(LED_PORTC_PINS, NUM_LED_PORTC_PINS);
+constexpr uint8_t LED_PORTD_PIN_BM = make_bitmap(LED_PORTD_PINS, NUM_LED_PORTD_PINS);
 
 /// -- FIRE CONSTANTS --
 

@@ -1,13 +1,15 @@
+#include "bcm.hpp"
+
 #include <avr/interrupt.h>
 #include <avr/io.h>
+#include <avr/pgmspace.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <avr/pgmspace.h>
 
-#include "bcm_types.hpp"
+#include "constants.h"
 #include "bcm_config_constants.hpp"
 #include "bcm_constants.hpp"
-#include "bcm.hpp"
+#include "bcm_types.hpp"
 
 volatile uint8_t BCM_CYCLE_END = 0;
 
@@ -40,13 +42,12 @@ void BCM_stop(void) {
 
 void BCM_encode(duty_t dutyCycle[], char portLetter, const uint8_t LEDPins[],
                 uint8_t nrOfLEDs) {
-  leds_t portbits = 0;
   leds_t bitmask;
   uint8_t bitposition;
 
   for (bitposition = 0, bitmask = 1; bitposition < NUMBER_OF_BITS;
        bitposition++, bitmask <<= 1) {
-    portbits = 0;
+    leds_t portbits = 0;
 
     for (uint8_t ledpos = 0; ledpos < nrOfLEDs; ledpos++) {
       if (((dutyCycle[ledpos] & bitmask) != 0) ^ INVERT_POLARITY) {
@@ -89,26 +90,22 @@ ISR(ISR_VECT) {
     BCM_CYCLE_END = 1;  // flag for main loop
   }
 
-// Turn off then on only the led pins
-#if LEDS_ON_PINS_PORTB != 0
-#if LEDS_ON_PINS_PORTB == 255
-  // if every LED is used, don't need to mask out unused pins
-  // (the compiler might be smart enough to figure this out anyway)
-  PORTB = timesliceB[bitpos];
-#else
-  PORTB = (PORTB & (~(LEDS_ON_PINS_PORTB))) | timesliceB[bitpos];
-#endif
-#endif
+  // Turn off then on only the led pins
+  if (LED_PORTB_PIN_BM != 0) {
+    if (LED_PORTB_PIN_BM == UINT8_MAX) {
+      // if every LED is used, don't need to mask out unused pins
+      // (the compiler might be smart enough to figure this out anyway)
+      PORTB = timesliceB[bitpos];
+    } else {
+      PORTB = (PORTB & (~(LED_PORTB_PIN_BM))) | timesliceB[bitpos];
+    }
+  }
 
-#if LEDS_ON_PINS_PORTD != 0
-  PORTC = (PORTC & (~(LEDS_ON_PINS_PORTC))) | timesliceC[bitpos];
-#endif
+  if (LED_PORTC_PIN_BM != 0) {
+    PORTC = (PORTC & (~(LED_PORTC_PIN_BM))) | timesliceC[bitpos];
+  }
 
-#if LEDS_ON_PINS_PORTC != 0
-  PORTD = (PORTD & (~(LEDS_ON_PINS_PORTD))) | timesliceD[bitpos];
-#endif
-
-#if LEDS_ON_PINS_PORTE != 0
-  PORTE = (PORTE & (~(LEDS_ON_PINS_PORTE))) | timesliceE[bitpos];
-#endif
+  if (LED_PORTD_PIN_BM != 0) {
+    PORTD = (PORTD & (~(LED_PORTD_PIN_BM))) | timesliceD[bitpos];
+  }
 }

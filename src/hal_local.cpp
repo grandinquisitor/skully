@@ -8,8 +8,9 @@
 #include <Adafruit_LIS3DH.h>
 #include <Wire.h>
 
-// only used for constants
 #include <LowPower.h>
+
+// only used for constants
 #include <SparkFunLIS3DH.h>
 
 #include "bcm.hpp"
@@ -70,24 +71,24 @@ bool got_click() {
 void enable_output() {
   // all pins are connected to the anodes of leds
   // so setting high output means off
-  PORTB |= port_b_bm;
-  PORTC |= port_c_bm;
-  PORTD |= port_d_bm;
-  DDRB |= port_b_bm;
-  DDRC |= port_c_bm;
-  DDRD |= port_d_bm;
+  PORTB |= LED_PORTB_PIN_BM;
+  PORTC |= LED_PORTC_PIN_BM;
+  PORTD |= LED_PORTD_PIN_BM;
+  DDRB |= LED_PORTB_PIN_BM;
+  DDRC |= LED_PORTC_PIN_BM;
+  DDRD |= LED_PORTD_PIN_BM;
 }
 
 void disable_output() {
   // set all outputs to INPUT_PULLUP
   // all pins are connected to the anodes of leds
   // so setting output high might also work
-  PORTB |= port_b_bm;
-  PORTC |= port_c_bm;
-  PORTD |= port_d_bm;
-  DDRB &= ~port_b_bm;
-  DDRC &= ~port_c_bm;
-  DDRD &= ~port_d_bm;
+  PORTB |= LED_PORTB_PIN_BM;
+  PORTC |= LED_PORTC_PIN_BM;
+  PORTD |= LED_PORTD_PIN_BM;
+  DDRB &= ~LED_PORTB_PIN_BM;
+  DDRC &= ~LED_PORTC_PIN_BM;
+  DDRD &= ~LED_PORTD_PIN_BM;
 }
 
 void wakeUp() {
@@ -111,6 +112,7 @@ void goToSleep() {
   BCM_init();
 }
 
+// TODO: use the constants from the library
 // from https://forums.adafruit.com/viewtopic.php?f=19&t=87936
 void configInterrupts() {
   // configurations for control registers
@@ -161,7 +163,7 @@ void readFromAccel(uint8_t addr, uint8_t* output) {
   if (Wire.endTransmission() != 0) {
     *output = 0;
   }
-  Wire.requestFrom(ACCEL_ADDRESS, 1);
+  Wire.requestFrom(ACCEL_ADDRESS, (uint8_t) 1);
   while (Wire.available())  // slave may send less than requested
   {
     *output = Wire.read();  // receive a byte as a proper uint8_t
