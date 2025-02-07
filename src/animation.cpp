@@ -28,8 +28,7 @@ bool animation_update(uint8_t brightness[], uint16_t roll, bool click, bool rese
   static uint8_t sparking = DEFAULT_SPARKING;
 
   uint8_t bottomLed = map(roll, 0, 0xffff, 0, NUM_LEDS);
-
-  uint8_t topLed = addmod8(bottomLed, (NUM_LEDS / 2), NUM_LEDS);
+  // uint8_t topLed = addmod8(bottomLed, (NUM_LEDS / 2), NUM_LEDS);
 
   directionRegister = 0;
   for (uint8_t i = 0; i < NUM_LEDS / 2; ++i) {
@@ -117,6 +116,8 @@ bool animation_update(uint8_t brightness[], uint16_t roll, bool click, bool rese
   for (int j = 0; j < NUM_LEDS; j++) {
     blendIt(BLEND_MODE, brightness[j], gammaCorrect(heat[j]));
   }
+
+  return false;
 }
 
 
@@ -192,4 +193,6 @@ bool accel_test_animation(uint8_t brightness[], uint16_t roll, bool click, bool 
       brightness[i] = 64;
     }
   }
+
+  return false;
 }
