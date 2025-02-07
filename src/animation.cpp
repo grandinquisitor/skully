@@ -178,3 +178,18 @@ void blendIt(BlendMode blendMode, uint8_t& brightness_ref, uint8_t new_val) {
       break;
   }
 }
+
+
+// test whether the accelerometer works
+bool accel_test_animation(uint8_t brightness[], uint16_t roll, bool click, bool reset) {
+
+  uint8_t bottomLed = map(roll, 0, 0xffff, 0, NUM_LEDS);
+
+  for (uint8_t i = 0; i < NUM_LEDS; ++i) {
+    if (i != bottomLed) {
+      brightness[i] = 0;
+    } else {
+      brightness[i] = 64;
+    }
+  }
+}
