@@ -1,15 +1,15 @@
-#include <avr/io.h>
-#include <avr/interrupt.h>
+#include "main.h"
 
-#include <Wire.h>
 #include <Adafruit_LIS3DH.h>
 #include <Adafruit_Sensor.h>
 #include <LowPower.h>
-#include <FastLED.h>
+#include <Wire.h>
+#include <avr/interrupt.h>
+#include <avr/io.h>
 
+#include "animation.h"
 #include "fxpt_atan2.h"
 #include "lis3dh_reg.h"
-#include "animation.h"
 #include "util.h"
 
 // Calculate update interval based on timer configuration
@@ -18,7 +18,7 @@
 // With prescaler = 32: Updates per tick = 256 / (F_CPU * 0.008)
 // (256 is an approximation)
 #ifndef F_CPU
-#define F_CPU 1000000UL
+#define F_CPU 2000000UL
 #endif
 #define TIMER_PRESCALER 32
 #define DESIRED_UPDATE_MS 45
@@ -30,10 +30,26 @@
 
 #define TIMER_USED 2
 
+#define I2C_SPEED 50000
+
+// TODO:
+// try in platformIO
+// why is the framerate so slow with the accelerometer turned on?
+// does millis() not work? (i.e. countdown not working)
+// doesn't that run in timer0?
+
+
+enum class BLEND_LEVEL {
+  BLEND_0,
+  BLEND_50,
+  BLEND_75,
+  BLEND_87_5
+};
+
 typedef enum {
-  PORT_B = 0,
-  PORT_C = 1,
-  PORT_D = 2
+  PORTB_ENUM = 0,
+  PORT_C_ENUM = 1,
+  PORT_D_ENUM = 2
 } PortIndex;
 
 typedef struct {
@@ -43,24 +59,24 @@ typedef struct {
 
 constexpr uint8_t NUM_LEDS = 18;
 constexpr LedMapping LED_MAP[NUM_LEDS] = {
-  { PORT_D, 0 },  // PORTD0
-  { PORT_C, 1 },  // PORTC1
-  { PORT_C, 0 },  // PORTC0
-  { PORT_B, 5 },  // PORTB5
-  { PORT_B, 4 },  // PORTB4
-  { PORT_B, 3 },  // PORTB3
-  { PORT_B, 2 },  // PORTB2
-  { PORT_B, 1 },  // PORTB1
-  { PORT_B, 0 },  // PORTB0
-  { PORT_D, 7 },  // PORTD7
-  { PORT_D, 6 },  // PORTD6
-  { PORT_D, 5 },  // PORTD5
-  { PORT_B, 7 },  // PORTB7
-  { PORT_B, 6 },  // PORTB6
-  { PORT_D, 4 },  // PORTD4
-  { PORT_D, 3 },  // PORTD3
-  { PORT_C, 3 },  // PORTC3
-  { PORT_C, 2 }   // PORTC2
+  { PORT_D_ENUM, 0 },  // PORTD0
+  { PORT_C_ENUM, 1 },  // PORTC1
+  { PORT_C_ENUM, 0 },  // PORTC0
+  { PORTB_ENUM, 5 },  // PORTB5
+  { PORTB_ENUM, 4 },  // PORTB4
+  { PORTB_ENUM, 3 },  // PORTB3
+  { PORTB_ENUM, 2 },  // PORTB2
+  { PORTB_ENUM, 1 },  // PORTB1
+  { PORTB_ENUM, 0 },  // PORTB0
+  { PORT_D_ENUM, 7 },  // PORTD7
+  { PORT_D_ENUM, 6 },  // PORTD6
+  { PORT_D_ENUM, 5 },  // PORTD5
+  { PORTB_ENUM, 7 },  // PORTB7
+  { PORTB_ENUM, 6 },  // PORTB6
+  { PORT_D_ENUM, 4 },  // PORTD4
+  { PORT_D_ENUM, 3 },  // PORTD3
+  { PORT_C_ENUM, 3 },  // PORTC3
+  { PORT_C_ENUM, 2 }   // PORTC2
 };
 
 constexpr uint8_t _make_bitmap(PortIndex pi) {
@@ -73,23 +89,26 @@ constexpr uint8_t _make_bitmap(PortIndex pi) {
   return bm;
 }
 
-constexpr uint8_t PORT_B_MASK = _make_bitmap(PORT_B);
-constexpr uint8_t PORT_C_MASK = _make_bitmap(PORT_C);
-constexpr uint8_t PORT_D_MASK = _make_bitmap(PORT_D);
+constexpr uint8_t PORT_B_MASK = _make_bitmap(PORTB_ENUM);
+constexpr uint8_t PORT_C_MASK = _make_bitmap(PORT_C_ENUM);
+constexpr uint8_t PORT_D_MASK = _make_bitmap(PORT_D_ENUM);
 
 // Global variables
-// so I can use memset() to reset all of them at once
-// volatile uint8_t g_timeslice[3][8] = {0};
-// volatile uint8_t *g_timeslice_b = g_timeslice[0];
-// volatile uint8_t *g_timeslice_c = g_timeslice[1];
-// volatile uint8_t *g_timeslice_d = g_timeslice[2];
+uint8_t g_timeslice[3][8] = { 0 };
+uint8_t *g_timeslice_b = g_timeslice[PORTB_ENUM];
+uint8_t *g_timeslice_c = g_timeslice[PORT_C_ENUM];
+uint8_t *g_timeslice_d = g_timeslice[PORT_D_ENUM];
 
-volatile uint8_t g_timeslice_b[8];
-volatile uint8_t g_timeslice_c[8];
-volatile uint8_t g_timeslice_d[8];
+#define IS_CONTIGUOUS(a, b, c) (((a) + (b) + (c) == 3) && ((a) * (b) * (c) == 0))
+static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORT_C_ENUM, PORT_D_ENUM), "weird values");
+
+// volatile uint8_t g_timeslice_b[8];
+// volatile uint8_t g_timeslice_c[8];
+// volatile uint8_t g_timeslice_d[8];
+
 volatile uint8_t g_tick = 0;
 volatile uint8_t g_bitpos = 0;
-volatile uint8_t brightness[NUM_LEDS] = { 0 };
+uint8_t brightness[NUM_LEDS] = { 0 };
 
 
 Adafruit_LIS3DH lis = Adafruit_LIS3DH();
@@ -102,13 +121,13 @@ constexpr uint8_t CLICKTHRESHHOLD = 20;
 constexpr uint8_t ACCEL_ADDRESS = 0x19;
 
 
+
 // void led_init(void);
 // void led_encode_timeslices(uint8_t intensity[]);
 // void update_led_pattern(uint8_t brightness[]);
 // void power_config();
 
-__attribute((OS_main)) int main(void) {
-  uint32_t animation_timestamp = 0;
+void setup() {
 
   led_init();
 
@@ -122,41 +141,86 @@ __attribute((OS_main)) int main(void) {
 
   other_hardware_config();
 
+  sei();
+
   if (!NO_LIS) {
     Wire.begin();
 
+#ifdef I2C_SPEED
+#if ((F_CPU / 18) < I2C_SPEED)
+#error "I2C speed too high"
+#else
+    Wire.setClock(I2C_SPEED);
+#endif
+#endif
+
     if (!connect_accel()) {
-      showError();
+      showError(5);
     }
   }
 
-  sei();
+  start_timer();
+}
 
-  bool animation_reset = true;
-  bool accel_reset = true;
+// TODO:
+// move setup timer out of led setup
+// fix timing: try vs. without accel
+// does it pull every time you call getAngle()?
 
-  while (1) {
-    while (g_tick == 0) { /*wait for g_tick to be non-zero*/
+
+void loop() {
+  static uint32_t animation_timestamp = 0;
+  static bool animation_reset = true;
+  static bool accel_reset = true;
+
+  while (g_tick == 0) { /*wait for g_tick to be non-zero*/
+  }
+  g_tick = 0;  //consume the tick
+
+  // Update animation based on calculated interval
+  if (++animation_timestamp >= UPDATES_PER_ANIMATION) {
+    animation_timestamp = 0;
+    bool animation_off = animation_update(brightness, getAngle(accel_reset), getClick(), animation_reset);
+    animation_reset = false;
+    accel_reset = false;
+
+    // test click is not latched on (works as expected)
+    // if (getClick()) {
+    //   brightness[0] = 64;
+    // } else {
+    //   brightness[0] >>= 1;
+    // }
+
+    if (animation_off && !NO_LIS) {
+      goToSleep();
+      animation_reset = true;
     }
-    g_tick = 0;  //consume the tick
-
-    // Update animation based on calculated interval
-    if (++animation_timestamp >= UPDATES_PER_ANIMATION) {
-      animation_timestamp = 0;
-      bool animation_off = animation_update(brightness, getAngle(accel_reset), getClick(), animation_reset);
-      animation_reset = false;
-      accel_reset = false;
-
-      if (animation_off && !NO_LIS) {
-        // goToSleep();
-        animation_reset = true;
-      }
-    }
-
-    led_encode_timeslices(brightness);
   }
 
-  return 0;
+  led_encode_timeslices(brightness);
+}
+
+void resetI2CBus() {
+  // Configure SCL as output and manually pulse it
+  DDRC |= _BV(PC5);    // SCL on PC5 (Arduino A5) - adjust for your board
+  PORTC &= ~_BV(PC5);  // Ensure SCL starts low
+
+  for (int i = 0; i < 9; i++) {
+    PORTC |= _BV(PC5);  // SCL high
+    _delay_us(10);
+    PORTC &= ~_BV(PC5);  // SCL low
+    _delay_us(10);
+  }
+
+  // Restore SCL to input (with pull-up)
+  DDRC &= ~_BV(PC5);
+  PORTC |= _BV(PC5);
+}
+
+void configureI2CFor1MHz() {
+  // Set TWI prescaler to 4 (TWSR |= _BV(TWPS0))
+  TWSR |= _BV(TWPS0);  // Prescaler = 4
+  TWBR = 1;            // TWBR = ((F_CPU / SCL_Freq) - 16) / (2 * Prescaler)
 }
 
 void led_init(void) {
@@ -169,13 +233,10 @@ void led_init(void) {
   DDRB |= PORT_B_MASK;
   DDRC |= PORT_C_MASK;
   DDRD |= PORT_D_MASK;
-
-  setup_timer();
 }
 
 
 void stop_leds(void) {
-  stop_timer();
   // turn all leds off, set to INPUT_PULLUP
   PORTB |= PORT_B_MASK;
   PORTC |= PORT_C_MASK;
@@ -187,7 +248,11 @@ void stop_leds(void) {
 }
 
 
-void setup_timer() {
+void start_timer() {
+  bool interruptWasEnabled = SREG & _BV(SREG_I);
+  if (interruptWasEnabled) {
+    cli();
+  }
 
 #if TIMER_USED != 2
 #error "selected timer not implemented"
@@ -216,10 +281,19 @@ void setup_timer() {
 
   OCR2A = 1;
   TIMSK2 = (1 << OCIE2A);  // Enable compare match interrupt
+
+  if (interruptWasEnabled) {
+    sei();
+  }
 }
 
 void stop_timer() {
-  // assume cli() has been called?
+  // once the timer is set up, we could just call cli() and sei() instead of individually just stopping/starting this timer
+
+  bool interruptWasEnabled = SREG & _BV(SREG_I);
+  if (interruptWasEnabled) {
+    cli();
+  }
 
   // stops the ISR
   TIMSK2 &= ~_BV(OCIE2A);
@@ -230,6 +304,10 @@ void stop_timer() {
   // reset the timer/counter state (not strictly needed)
   // TCNT2 = 0;  // Reset the timer counter
   // OCR2A = 0;  // Reset the output compare register
+
+  if (interruptWasEnabled) {
+    sei();
+  }
 }
 
 void other_hardware_config() {
@@ -261,15 +339,16 @@ void other_hardware_config() {
   PORTD |= INT_PIN_BM;
 }
 
-void led_encode_timeslices(volatile uint8_t intensity[]) {
+void led_encode_timeslices(uint8_t intensity[]) {
   // Clear all timeslices (start with all LEDs off)
 
   // memset(g_timeslice_b, 0xFF, 8);
-  for (uint8_t bitpos = 0; bitpos < 8; bitpos++) {
-    g_timeslice_b[bitpos] = 0xFF;
-    g_timeslice_c[bitpos] = 0xFF;
-    g_timeslice_d[bitpos] = 0xFF;
-  }
+  // for (uint8_t bitpos = 0; bitpos < 8; bitpos++) {
+  //   g_timeslice_b[bitpos] = 0xFF;
+  //   g_timeslice_c[bitpos] = 0xFF;
+  //   g_timeslice_d[bitpos] = 0xFF;
+  // }
+  memset(g_timeslice, 0xFF, sizeof(g_timeslice));
 
   // For each LED
   for (uint8_t led = 0; led < NUM_LEDS; led++) {
@@ -280,18 +359,18 @@ void led_encode_timeslices(volatile uint8_t intensity[]) {
         // TODO: LUT this bit shift
         uint8_t pin_mask = ~_BV(LED_MAP[led].pin);  // Inverted because LOW = ON
 
-        // g_timeslice[LED_MAP[led].port][bitpos] &= pin_mask;
-        switch (LED_MAP[led].port) {
-          case PORT_B:
-            g_timeslice_b[bitpos] &= pin_mask;
-            break;
-          case PORT_C:
-            g_timeslice_c[bitpos] &= pin_mask;
-            break;
-          case PORT_D:
-            g_timeslice_d[bitpos] &= pin_mask;
-            break;
-        }
+        g_timeslice[LED_MAP[led].port][bitpos] &= pin_mask;
+        // switch (LED_MAP[led].port) {
+        //   case PORT_B:
+        //     g_timeslice_b[bitpos] &= pin_mask;
+        //     break;
+        //   case PORT_C:
+        //     g_timeslice_c[bitpos] &= pin_mask;
+        //     break;
+        //   case PORT_D:
+        //     g_timeslice_d[bitpos] &= pin_mask;
+        //     break;
+        // }
       }
     }
   }
@@ -313,7 +392,7 @@ bool connect_accel() {
   }
 }
 
-void showError() {
+void showError(uint8_t times) {
   uint8_t old_ddrd4_bit = DDRD & _BV(DDD4);
   DDRD |= _BV(DDD4);
 
@@ -325,7 +404,7 @@ void showError() {
   }
 
   if (old_ddrd4_bit) {
-    DDRD |= _BV(DDD4);   // If original bit was 1, set it back to 1
+    DDRD |= _BV(DDD4);  // If original bit was 1, set it back to 1
   } else {
     DDRD &= ~_BV(DDD4);  // If original bit was 0, set it back to 0
   }
@@ -337,28 +416,49 @@ uint16_t getAngle(bool reset) {
   }
 
   constexpr uint16_t ACCEL_ANGLE_OFFSET = 0x3fff;  // based on the orientation of the chip on the board
-
+  static uint32_t accelCounter = 0;
+  static uint16_t roll = 0;
   static int32_t xFilter, yFilter;
 
-  lis.read();
-
+  bool got_new_read = false;
   if (reset) {
+    lis.read();
+    accelCounter = millis();  // not strictly necessary
     xFilter = setFilterValue(lis.x);
     yFilter = setFilterValue(lis.y);
+    got_new_read = true;
   } else {
-    smoothInt(lis.x, 1, &xFilter);
-    smoothInt(lis.y, 1, &yFilter);
+    if (countDown(&accelCounter, 500)) {
+      lis.read();
+      smoothInt(lis.x, 1, &xFilter);
+      smoothInt(lis.y, 1, &yFilter);
+      got_new_read = true;
+    }
   }
 
-  uint16_t roll = fxpt_atan2(getFilterValue(xFilter), getFilterValue(yFilter)) + ACCEL_ANGLE_OFFSET;
+  if (got_new_read) {
+    roll = fxpt_atan2(getFilterValue(xFilter), getFilterValue(yFilter)) + ACCEL_ANGLE_OFFSET;
+  }
+
+  return roll;
 }
 
 bool getClick() {
   if (NO_LIS) {
     return true;
   }
-  uint8_t click = lis.getClick();
-  return !(click == 0 || !(click & 0x30));
+
+  static uint32_t accelCounter = 0;
+
+  if (countDown(&accelCounter, 50)) {
+    uint8_t click = lis.getClick();
+    if (!(click == 0 || !(click & 0x30))) {
+      // not necessary to clear, based on the configuration
+      // clearInterrupt();
+      return true;
+    }
+  }
+  return false;
 }
 
 // TODO: replace with proper constants and use lis3dh_reg_t for readability
@@ -377,76 +477,12 @@ void configInterrupts() {
   sendToAccel(0x32, 0x10);  //Write 10h into INT1_THS;          // Threshold (THS) = 16LSBs * 15.625mg/LSB = 250mg.
   sendToAccel(0x33, 0x00);  //Write 00h into INT1_DURATION;     // Duration = 1LSBs * (1/10Hz) = 0.1s.
   //readRegister();  //Dummy read to force the HP filter to set reference acceleration/tilt value
-  sendToAccel(0x30, 0x2A);  //Write 2Ah into INT1_CFG;          // Enable XLIE, YLIE, ZLIE interrupt generation, OR logic.
+  sendToAccel(0x30, 0x2A);  //Write 2Ah into INT1_CFG;          // Enable XHIE, YHIE, ZHIE interrupt generation, OR logic.
 }
 
 void disableHpf() {
   sendToAccel(0x21, 0x00);
 }
-
-/*
-void configInterrupts() {
-
-  // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
-  sendToAccel(LIS3DH_CTRL_REG1, lis3dh_reg_t{ .ctrl_reg1 = {
-    .xen = 1,
-    .yen = 1,
-    .zen = 1,
-    .lpen = 0,
-    .odr = LIS3DH_ODR_100Hz
-  }});
-
-  // Configure CTRL_REG2: High-pass filter enabled for IA1
-  sendToAccel(LIS3DH_CTRL_REG2, lis3dh_reg_t{ .ctrl_reg2 = {
-    .hp = 0x1, // HP_IA1 enabled
-    .fds = 1,  // Filtered data enabled
-    .hpcf = LIS3DH_AGGRESSIVE,
-    .hpm = LIS3DH_NORMAL_WITH_RST
-  }});
-
-  // Configure CTRL_REG3: Route IA1 interrupt to INT1
-  sendToAccel(LIS3DH_CTRL_REG3, lis3dh_reg_t{ .ctrl_reg3 = {
-    .i1_ia1 = 1
-  }});
-
-  // Configure CTRL_REG4: Full scale ±2g, High-resolution disabled
-  sendToAccel(LIS3DH_CTRL_REG4, lis3dh_reg_t{ .ctrl_reg4 = {
-    .fs = LIS3DH_2g,
-    .bdu = 0
-  }});
-
-  // Configure CTRL_REG5: No latching interrupts
-  sendToAccel(LIS3DH_CTRL_REG5, lis3dh_reg_t{ .ctrl_reg5 = {
-    .lir_int1 = 0
-  }});
-
-  // Configure CTRL_REG6: Interrupt polarity (active low)
-  sendToAccel(LIS3DH_CTRL_REG6, lis3dh_reg_t{ .ctrl_reg6 = {
-    .int_polarity = 1
-  }});
-
-  // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
-  sendToAccel(LIS3DH_INT1_THS, lis3dh_reg_t{ .int1_ths = {
-    .ths = 16
-  }});
-
-  // Configure INT1_DURATION: Duration = 0.1s
-  sendToAccel(LIS3DH_INT1_DURATION, lis3dh_reg_t{ .int1_duration = {
-    .d = 0
-  }});
-
-  // Configure INT1_CFG: Enable XHIE, YHIE, ZHIE with OR logic
-  sendToAccel(LIS3DH_INT1_CFG, lis3dh_reg_t{ .int1_cfg = {
-    .xhie = 1,
-    .yhie = 1,
-    .zhie = 1,
-    .aoi = 0
-  }});
-
-  inline void sendToAccel(uint8_t addr, lis3dh_reg_t val) {
-    sendToAccel(addr, val.byte)
-  }
-  */
 
 void sendToAccel(uint8_t addr, uint8_t val) {
   Wire.beginTransmission(ACCEL_ADDRESS);
@@ -455,12 +491,7 @@ void sendToAccel(uint8_t addr, uint8_t val) {
   Wire.endTransmission();  // stop transmitting
 }
 
-void clearInterrupt() {
-  uint8_t dataRead;
-  readFromAccel(LIS3DH_INT1_SRC, &dataRead);
-}
-
-void readFromAccel(uint8_t addr, uint8_t* output) {
+void readFromAccel(uint8_t addr, uint8_t *output) {
   Wire.beginTransmission(ACCEL_ADDRESS);
   Wire.write(addr);
   if (Wire.endTransmission() != 0) {
@@ -473,7 +504,13 @@ void readFromAccel(uint8_t addr, uint8_t* output) {
   }
 }
 
+void clearInterrupt() {
+  uint8_t dataRead;
+  readFromAccel(LIS3DH_INT1_SRC, &dataRead);
+}
+
 void goToSleep() {
+  stop_timer();
   stop_leds();
   configInterrupts();  // only really needs to be called once
   // TODO: set the accel to a lower power mode
@@ -482,6 +519,7 @@ void goToSleep() {
   detachInterrupt(0);
   disableHpf();
   led_init();
+  start_timer();
 }
 
 // ---
@@ -514,4 +552,4 @@ void wakeUp() {
   // Just a handler for the pin interrupt.
   // use this if the accel config needs the interrupt to be cleared:
   // clearInterrupt();
-}gg
+}
