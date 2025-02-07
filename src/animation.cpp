@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "FastLED.h"
+#include <FastLED.h>
 
 #include "constants.h"
 #include "util.h"
@@ -24,12 +24,8 @@ constexpr BlendMode BLEND_MODE = BlendMode::BLEND_87_5;
 
 
 bool animation_update(uint8_t brightness[], uint16_t roll, bool click, bool reset) {
-  static int8_t prevBottomLed = -1;
   static uint32_t directionRegister = 0;
   static uint8_t sparking = DEFAULT_SPARKING;
-
-  static int32_t xFilter = 0;
-  static int32_t yFilter = 0;
 
   uint8_t bottomLed = map(roll, 0, 0xffff, 0, NUM_LEDS);
 
@@ -64,10 +60,8 @@ bool animation_update(uint8_t brightness[], uint16_t roll, bool click, bool rese
     return true;
   }
 
-
   // Array of temperature readings at each simulation cell
   static uint8_t heat[NUM_LEDS];
-
 
   // Step 1.  Cool down every cell a little
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
