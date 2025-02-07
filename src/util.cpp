@@ -64,13 +64,6 @@ bool countDown(uint32_t *prevTime, uint16_t wait) {
   }
 }
 
-void smoothInt2(uint16_t sample, uint8_t bits, int32_t *filter, int32_t *filter2) {
-  int32_t local_sample = ((int32_t)sample) << 16;
-  int32_t delta = local_sample - (*filter);
-  *filter2 += (delta - *filter2) >> bits;
-  smoothInt(sample, bits, filter);
-}
-
 uint8_t decr(uint8_t val, uint8_t mod) {
   return (val == 0) ? mod - 1 : val - 1;
 }
