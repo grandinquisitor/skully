@@ -22,6 +22,8 @@ void led_encode_timeslices(uint8_t intensity[]);
 
 bool connect_accel();
 
+void test_delay();
+
 void showError(uint8_t);
 
 uint16_t getAngle(bool reset);
