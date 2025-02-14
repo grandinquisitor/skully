@@ -168,6 +168,9 @@ void blendIt(BlendMode blendMode, uint8_t& brightness_ref, uint8_t new_val) {
     case BlendMode::BLEND_0:
       brightness_ref = new_val;
       break;
+    case BlendMode::BLEND_25:
+      brightness_ref = (brightness_ref >> 1) + (brightness_ref >> 2) + (new_val >> 2);
+      break;
     case BlendMode::BLEND_50:
       brightness_ref = (brightness_ref >> 1) + (new_val >> 1);
       break;

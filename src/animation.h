@@ -6,6 +6,7 @@
 
 enum class BlendMode {
   BLEND_0,
+  BLEND_25,
   BLEND_50,
   BLEND_75,
   BLEND_87_5
