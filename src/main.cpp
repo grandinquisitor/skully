@@ -6,6 +6,7 @@
 #include <avr/io.h>
 #include <avr/power.h>
 
+#include "constants.h"
 #include "animation.h"
 #include "fxpt_atan2.h"
 #include "lis3dh_reg.h"
@@ -84,7 +85,6 @@ typedef struct {
   uint8_t pin;
 } LedMapping;
 
-constexpr uint8_t NUM_LEDS = 18;
 constexpr LedMapping LED_MAP[NUM_LEDS] = {
     {PORT_D_ENUM, PORTD0},  // PORTD0
     {PORT_C_ENUM, PORTC1},  // PORTC1
@@ -139,7 +139,6 @@ uint8_t brightness[NUM_LEDS] = {0};
 // if false and LIS setup fails, setup will overwrite this to true
 bool NO_LIS = false;
 
-constexpr uint8_t CLICKTHRESHHOLD = 20;
 constexpr uint8_t ACCEL_ADDRESS = 0x19;
 
 volatile bool gotInterrupt = 0;
@@ -153,6 +152,8 @@ void setup() {
   clock_prescale_set(clock_div_2);
 #elif F_CPU == 8000000UL
 // no prescaler needed
+#else
+#error "unexpected F_CPU"
 #endif
 
   led_init();
@@ -295,11 +296,7 @@ void start_timer() {
 void stop_timer() {
   // once the timer is set up, we could just call cli() and sei() instead of
   // individually just stopping/starting this timer
-
-  bool interruptWasEnabled = SREG & _BV(SREG_I);
-  if (interruptWasEnabled) {
-    cli();
-  }
+  SAVE_AND_DISABLE_INTERRUPTS();
 
   // stops the ISR
   TIMSK2 &= ~_BV(OCIE2A);
@@ -311,9 +308,7 @@ void stop_timer() {
   // TCNT2 = 0;  // Reset the timer counter
   // OCR2A = 0;  // Reset the output compare register
 
-  if (interruptWasEnabled) {
-    sei();
-  }
+  RESTORE_INTERRUPTS();
 }
 
 void other_hardware_config() {
