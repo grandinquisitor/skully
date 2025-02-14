@@ -66,6 +66,10 @@
     sei();                   \
   }
 
+constexpr lis3dh_odr_t WAKE_DATARATE = LIS3DH_ODR_25Hz;
+constexpr lis3dh_odr_t SLEEP_DATARATE = LIS3DH_ODR_25Hz;
+#define USE_SEPARATE_SLEEP_SETTING false
+
 constexpr uint16_t GET_ANGLE_FREQ = 100;
 constexpr uint16_t GET_CLICK_FREQ = 200;
 
@@ -127,10 +131,6 @@ uint8_t *g_timeslice_d = g_timeslice[PORT_D_ENUM];
 static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORT_C_ENUM, PORT_D_ENUM),
               "weird values");
 
-// volatile uint8_t g_timeslice_b[8];
-// volatile uint8_t g_timeslice_c[8];
-// volatile uint8_t g_timeslice_d[8];
-
 volatile uint8_t g_tick = 0;
 volatile uint8_t g_bitpos = 0;
 uint8_t brightness[NUM_LEDS] = {0};
@@ -157,12 +157,6 @@ void setup() {
 
   led_init();
 
-  // Initialize all brightness values to 0
-  // memset()
-  // for (uint8_t i = 0; i < NUM_LEDS; i++) {
-  //   brightness[i] = 0;
-  // }
-
   led_encode_timeslices(brightness);
 
   other_hardware_config();
@@ -176,13 +170,12 @@ void setup() {
     Wire.setClock(I2C_SPEED);
 #endif
 
-    // new idea:
-    // try switching the code that reads it
-
-    if (setupAccel()) {
+    if (setupAccelStartup()) {
       NO_LIS = false;
 #if TAP_DETECT_METHOD == TAP_DETECT_METHOD_PULSE
       setupInterrupt();
+#else
+#error "not implemented"
 #endif
     } else {
       NO_LIS = true;
@@ -388,7 +381,6 @@ void led_encode_timeslices(uint8_t intensity[]) {
   }
 }
 
-
 // used to test timing
 void test_delay() {
   DDRD |= _BV(DDD0);
@@ -548,7 +540,7 @@ bool getClick() {
   static uint32_t accelCounter = 0;
 
   if (countDown(&accelCounter, GET_CLICK_FREQ)) {
-    uint8_t click = 0; // lis.getClick();
+    uint8_t click = 0;  // lis.getClick();
     if (!(click == 0 || !(click & 0x30))) {
       // only necessary to call this if we are using the latching interrupt
       // clearInterrupt();
@@ -593,7 +585,8 @@ inline bool sendToAccelAndVerify(uint8_t addr, lis3dh_reg_t val) {
   return byteVal == val.byte;
 }
 
-#if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE && TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
+#if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE && \
+    TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
 void configInterrupts() {
   // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
   sendToAccel(LIS3DH_CTRL_REG1,
@@ -673,9 +666,7 @@ void disableHpf() {
 }
 #endif
 
-ISR(INT0_vect) {
-  gotInterrupt = true;
-}
+ISR(INT0_vect) { gotInterrupt = true; }
 
 void setupInterrupt() {
   SAVE_AND_DISABLE_INTERRUPTS();
@@ -693,8 +684,32 @@ void setupInterrupt() {
   RESTORE_INTERRUPTS();
 }
 
-bool setupAccel() {
-  constexpr lis3dh_odr_t ODR = LIS3DH_ODR_100Hz;
+inline bool setupAccelStartup() {
+#if USE_SEPARATE_SLEEP_SETTING
+  return setupAccel(WAKE_DATARATE, false);
+#else
+  return setupAccel(SLEEP_DATARATE, true);
+#endif
+}
+
+inline bool setupAccelSleep() {
+#if USE_SEPARATE_SLEEP_SETTING
+#error "does not work, will not wake if reconfigured before sleep"
+  return setupAccel(SLEEP_DATARATE, true);
+#else
+  return true;
+#endif
+}
+
+inline bool setupAccelReawaken() {
+#if USE_SEPARATE_SLEEP_SETTING
+  return setupAccel(WAKE_DATARATE, false);
+#else
+  return true;
+#endif
+}
+
+bool setupAccel(lis3dh_odr_t dataRate, bool lowPower) {
   constexpr lis3dh_fs_t MAGNITUDE = LIS3DH_2g;
 
   _delay_ms(5);  // app note specifies it takes 5ms to boot (and starts in power
@@ -705,10 +720,12 @@ bool setupAccel() {
   }
 
   // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
-  sendToAccel(
-      LIS3DH_CTRL_REG1,
-      lis3dh_reg_t{
-          .ctrl_reg1 = {.xen = 1, .yen = 1, .zen = 1, .lpen = 0, .odr = ODR}});
+  sendToAccel(LIS3DH_CTRL_REG1,
+              lis3dh_reg_t{.ctrl_reg1 = {.xen = 1,
+                                         .yen = 1,
+                                         .zen = 1,
+                                         .lpen = (uint8_t)lowPower,
+                                         .odr = (uint8_t)dataRate}});
 
   _delay_ms(2);  // app note says it takes a few ms to change the ODR
   // this may not be the exact value
@@ -779,28 +796,6 @@ bool setupAccel() {
   return true;
 }
 
-void setupLowPowerAccel() {
-  constexpr lis3dh_odr_t ODR = LIS3DH_ODR_25Hz;
-  constexpr lis3dh_fs_t MAGNITUDE = LIS3DH_2g;
-
-// enable low power mode
-  sendToAccel(
-      LIS3DH_CTRL_REG1,
-      lis3dh_reg_t{
-          .ctrl_reg1 = {.xen = 1, .yen = 1, .zen = 1, .lpen = 1, .odr = ODR}});
-
-  _delay_ms(2);  // app note says it takes a few ms to change the ODR
-  // this may not be the exact value
-
-  // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
-  sendToAccel(LIS3DH_INT1_THS,
-              lis3dh_reg_t{.int1_ths = {.ths = 16, .not_used_01 = 0}});
-
-  // Configure INT1_DURATION: Duration = 0.1s
-  sendToAccel(LIS3DH_INT1_DURATION,
-              lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
-}
-
 void sendToAccel(uint8_t addr, uint8_t val) {
   Wire.beginTransmission(ACCEL_ADDRESS);
   Wire.write(byte(addr));  // register address
@@ -850,17 +845,13 @@ void goToSleep() {
   cli();
   stop_timer();
   stop_leds();
-  setupLowPowerAccel();
+  setupAccelSleep();
   // assumes interrupt handler is already set up
-  while (~PIND & INT_PIN_BM) {}
+  while (~PIND & INT_PIN_BM) {
+  }
   sei();
-  // configInterrupts();  // only really needs to be called once
-  // TODO: set the accel to a lower power mode
-  // attachInterrupt(0, wakeUp, LOW);
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-  // detachInterrupt(0);
-  // disableHpf();
-  setupAccel();  // restore to high power mode by just re-running initial setup
+  setupAccelReawaken();
   led_init();
   start_timer();
 }
@@ -891,10 +882,4 @@ ISR(TIMER2_COMPA_vect) {
     g_tick = 1;  // Signal the end of an 8-bit BCM cycle (purpose of g_tick
                  // needs clarification)
   }
-}
-
-void wakeUp() {
-  // Just a handler for the pin interrupt.
-  // use this if the accel config needs the interrupt to be cleared:
-  // clearInterrupt();
 }
