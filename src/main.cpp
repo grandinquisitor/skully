@@ -1,7 +1,5 @@
 #include "main.h"
 
-#include <Adafruit_LIS3DH.h>
-#include <Adafruit_Sensor.h>
 #include <LowPower.h>
 #include <Wire.h>
 #include <avr/interrupt.h>
@@ -136,8 +134,6 @@ static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORT_C_ENUM, PORT_D_ENUM),
 volatile uint8_t g_tick = 0;
 volatile uint8_t g_bitpos = 0;
 uint8_t brightness[NUM_LEDS] = {0};
-
-Adafruit_LIS3DH lis = Adafruit_LIS3DH();
 
 // set to false to use LIS
 // if false and LIS setup fails, setup will overwrite this to true
@@ -392,22 +388,6 @@ void led_encode_timeslices(uint8_t intensity[]) {
   }
 }
 
-// ---
-// accelerometer/I2C functions
-bool connect_accel() {
-  if (!lis.begin(ACCEL_ADDRESS)) {
-    NO_LIS = true;
-    return false;
-  } else {
-    NO_LIS = false;
-    // TODO: overwritten by configInterrupts anyway, rewrite using a consistent
-    // driver
-    lis.setRange(LIS3DH_RANGE_2_G);  // 2, 4, 8 or 16 G!
-    lis.setClick(2, CLICKTHRESHHOLD);
-    disableHpf();
-    return true;
-  }
-}
 
 // used to test timing
 void test_delay() {
@@ -446,6 +426,9 @@ void showError(uint8_t times) {
   }
 }
 
+// ---
+// accelerometer/I2C functions
+
 int16_t X_ACCELERATION = 0;
 int16_t Y_ACCELERATION = 0;
 int16_t Z_ACCELERATION = 0;
@@ -463,7 +446,7 @@ void updateAcceleration() {
 #endif
 
   uint8_t buffer[NUM_BYTES];
-  readRegionFromAccel(LIS3DH_REG_OUT_X_L, buffer, NUM_BYTES);
+  readRegionFromAccel(LIS3DH_OUT_X_L, buffer, NUM_BYTES);
 
   int16_t x, y;
 
@@ -492,8 +475,8 @@ uint16_t getAngle(bool reset) {
     return 0;
   }
 
-  int16_t &x_value = X_ACCELERATION;  //  lis.x;
-  int16_t &y_value = Y_ACCELERATION;  //  lis.y;
+  int16_t &x_value = X_ACCELERATION;
+  int16_t &y_value = Y_ACCELERATION;
 
   constexpr uint16_t ACCEL_ANGLE_OFFSET =
       0x3fff;  // based on the orientation of the chip on the board
@@ -503,7 +486,6 @@ uint16_t getAngle(bool reset) {
 
   bool got_new_read = false;
   if (reset) {
-    // lis.read();
     updateAcceleration();
     accelCounter = millis();  // not strictly necessary
     xFilter = setFilterValue(x_value);
@@ -511,7 +493,6 @@ uint16_t getAngle(bool reset) {
     got_new_read = true;
   } else {
     if (countDown(&accelCounter, GET_ANGLE_FREQ)) {
-      //      lis.read();
       updateAcceleration();
       smoothInt(x_value, 1, &xFilter);
       smoothInt(y_value, 1, &yFilter);
@@ -567,7 +548,7 @@ bool getClick() {
   static uint32_t accelCounter = 0;
 
   if (countDown(&accelCounter, GET_CLICK_FREQ)) {
-    uint8_t click = lis.getClick();
+    uint8_t click = 0; // lis.getClick();
     if (!(click == 0 || !(click & 0x30))) {
       // only necessary to call this if we are using the latching interrupt
       // clearInterrupt();
@@ -588,7 +569,7 @@ bool getClick() {
     gotInterrupt = false;
     return true;
   } else {
-  return false;
+    return false;
   }
 
 #elif TAP_DETECT_METHOD == TAP_DETECT_METHOD_LATCH
@@ -719,12 +700,9 @@ bool setupAccel() {
   _delay_ms(5);  // app note specifies it takes 5ms to boot (and starts in power
                  // down mode)
 
-  // unsure of the intended difference between LIS3DH_WHO_AM_I and
-  // LIS3DH_REG_WHOAMI
-  if (readByteFromAccel(LIS3DH_REG_WHOAMI) != LIS3DH_ID) {
+  if (readByteFromAccel(LIS3DH_WHO_AM_I) != LIS3DH_ID) {
     return false;
   }
-
 
   // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
   sendToAccel(
