@@ -6,11 +6,19 @@
 #include <avr/io.h>
 #include <avr/power.h>
 
-#include "constants.h"
 #include "animation.h"
+#include "constants.h"
 #include "fxpt_atan2.h"
 #include "lis3dh_reg.h"
 #include "util.h"
+
+#ifndef F_CPU
+#error "no F_CPU"
+#endif
+
+/**
+ * @section Timer setup
+ */
 
 #define TIMER_PRESCALER 64
 #define FRAME_INTERVAL_MS 64
@@ -27,6 +35,10 @@
 #endif
 
 #define TIMER_USED 2
+
+/**
+ * @section I2C setup
+ */
 
 #define I2C_SPEED_400KHZ 400000
 #define I2C_SPEED_100KHZ 100000
@@ -46,15 +58,9 @@
 #endif
 #endif
 
-#define TAP_DETECT_METHOD_CALCULATE 1
-#define TAP_DETECT_METHOD_PULSE 2
-#define TAP_DETECT_METHOD_LATCH 3
-#define TAP_DETECT_METHOD_CLICK_POLL 4
-#define TAP_DETECT_METHOD TAP_DETECT_METHOD_PULSE
-
-#if TAP_DETECT_METHOD == TAP_DETECT_METHOD_CALCULATE
-#define READ_Z
-#endif
+/**
+ * @section Macros
+ */
 
 #define SAVE_AND_DISABLE_INTERRUPTS()            \
   bool interruptWasEnabled = SREG & _BV(SREG_I); \
@@ -67,6 +73,15 @@
     sei();                   \
   }
 
+/**
+ * @section accelerometer constants
+ */
+
+constexpr uint8_t ACCEL_ADDRESS = 0x19;
+
+// based on the orientation of the chip on the board
+constexpr uint16_t ACCEL_ANGLE_OFFSET = 0x3fff;
+
 constexpr lis3dh_odr_t WAKE_DATARATE = LIS3DH_ODR_25Hz;
 constexpr lis3dh_odr_t SLEEP_DATARATE = LIS3DH_ODR_25Hz;
 #define USE_SEPARATE_SLEEP_SETTING false
@@ -76,9 +91,26 @@ constexpr uint16_t GET_CLICK_FREQ = 200;
 
 constexpr uint8_t INT_PIN_BM = _BV(PORTD2);
 
-enum class BLEND_LEVEL { BLEND_0, BLEND_50, BLEND_75, BLEND_87_5 };
+#define TAP_DETECT_METHOD_CALCULATE 1
+#define TAP_DETECT_METHOD_PULSE 2
+#define TAP_DETECT_METHOD_LATCH 3
+#define TAP_DETECT_METHOD_CLICK_POLL 4
+#define TAP_DETECT_METHOD TAP_DETECT_METHOD_PULSE
+
+#if TAP_DETECT_METHOD == TAP_DETECT_METHOD_CALCULATE
+#define READ_Z
+#endif
+
+/**
+ * @section LED port setup
+ */
 
 typedef enum { PORTB_ENUM = 0, PORT_C_ENUM = 1, PORT_D_ENUM = 2 } PortIndex;
+
+#define IS_CONTIGUOUS(a, b, c) \
+  (((a) + (b) + (c) == 3) && ((a) * (b) * (c) == 0))
+static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORT_C_ENUM, PORT_D_ENUM),
+              "weird values");
 
 typedef struct {
   PortIndex port;
@@ -120,16 +152,13 @@ constexpr uint8_t PORT_B_MASK = _make_bitmap(PORTB_ENUM);
 constexpr uint8_t PORT_C_MASK = _make_bitmap(PORT_C_ENUM);
 constexpr uint8_t PORT_D_MASK = _make_bitmap(PORT_D_ENUM);
 
-// Global variables
+/**
+ * @section global variables
+ */
 uint8_t g_timeslice[3][8] = {0};
 uint8_t *g_timeslice_b = g_timeslice[PORTB_ENUM];
 uint8_t *g_timeslice_c = g_timeslice[PORT_C_ENUM];
 uint8_t *g_timeslice_d = g_timeslice[PORT_D_ENUM];
-
-#define IS_CONTIGUOUS(a, b, c) \
-  (((a) + (b) + (c) == 3) && ((a) * (b) * (c) == 0))
-static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORT_C_ENUM, PORT_D_ENUM),
-              "weird values");
 
 volatile uint8_t g_tick = 0;
 volatile uint8_t g_bitpos = 0;
@@ -139,9 +168,11 @@ uint8_t brightness[NUM_LEDS] = {0};
 // if false and LIS setup fails, setup will overwrite this to true
 bool NO_LIS = false;
 
-constexpr uint8_t ACCEL_ADDRESS = 0x19;
-
 volatile bool gotInterrupt = 0;
+
+/**
+ * @section main code
+ */
 
 void setup() {
 #if F_CPU == 1000000UL
@@ -213,6 +244,10 @@ void loop() {
   led_encode_timeslices(brightness);
 }
 
+/**
+ * @section hardware setup
+ */
+
 void resetI2CBus() {
   // Configure SCL as output and manually pulse it
   DDRC |= _BV(PC5);    // SCL on PC5 (Arduino A5) - adjust for your board
@@ -230,10 +265,22 @@ void resetI2CBus() {
   PORTC |= _BV(PC5);
 }
 
-void configureI2CFor1MHz() {
-  // Set TWI prescaler to 4 (TWSR |= _BV(TWPS0))
-  TWSR |= _BV(TWPS0);  // Prescaler = 4
-  TWBR = 1;            // TWBR = ((F_CPU / SCL_Freq) - 16) / (2 * Prescaler)
+void showError(uint8_t times) {
+  uint8_t old_ddrd4_bit = DDRD & _BV(DDD4);
+  DDRD |= _BV(DDD4);
+
+  for (uint8_t i = 0; i < 5; i++) {
+    PORTD &= ~_BV(PORTD4);
+    delay(500);
+    PORTD |= _BV(PORTD4);
+    delay(500);
+  }
+
+  if (old_ddrd4_bit) {
+    DDRD |= _BV(DDD4);  // If original bit was 1, set it back to 1
+  } else {
+    DDRD &= ~_BV(DDD4);  // If original bit was 0, set it back to 0
+  }
 }
 
 void led_init(void) {
@@ -339,10 +386,50 @@ void other_hardware_config() {
   PORTD |= INT_PIN_BM;
 }
 
+// used to test timing
+void test_delay() {
+  DDRD |= _BV(DDD0);
+  while (1) {
+    for (uint8_t i = 0; i < 5; i++) {
+      PORTD &= ~_BV(PORTD0);
+      delay(1000);
+      PORTD |= _BV(PORTD0);
+      delay(1000);
+    }
+    for (uint8_t i = 0; i < 5; i++) {
+      PORTD &= ~_BV(PORTD0);
+      _delay_ms(1000);
+      PORTD |= _BV(PORTD0);
+      _delay_ms(1000);
+    }
+  }
+}
+
+void goToSleep() {
+#if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
+#error "not implemented"
+#endif
+  cli();
+  stop_timer();
+  stop_leds();
+  setupAccelSleep();
+  // assumes interrupt handler is already set up
+  while (~PIND & INT_PIN_BM) {
+  }
+  sei();
+  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+  setupAccelReawaken();
+  led_init();
+  start_timer();
+}
+
+/**
+ * @section LED functions
+ */
+
 void led_encode_timeslices(uint8_t intensity[]) {
   // Clear all timeslices (start with all LEDs off)
 
-  // memset(g_timeslice_b, 0xFF, 8);
   // for (uint8_t bitpos = 0; bitpos < 8; bitpos++) {
   //   g_timeslice_b[bitpos] = 0xFF;
   //   g_timeslice_c[bitpos] = 0xFF;
@@ -376,45 +463,34 @@ void led_encode_timeslices(uint8_t intensity[]) {
   }
 }
 
-// used to test timing
-void test_delay() {
-  DDRD |= _BV(DDD0);
-  while (1) {
-    for (uint8_t i = 0; i < 5; i++) {
-      PORTD &= ~_BV(PORTD0);
-      delay(1000);
-      PORTD |= _BV(PORTD0);
-      delay(1000);
-    }
-    for (uint8_t i = 0; i < 5; i++) {
-      PORTD &= ~_BV(PORTD0);
-      _delay_ms(1000);
-      PORTD |= _BV(PORTD0);
-      _delay_ms(1000);
-    }
+ISR(TIMER2_COMPA_vect) {
+  g_bitpos++;
+  g_bitpos &= 7;
+
+  // Update all ports with their current timeslice, preserving unused pins
+  PORTB = (PORTB & ~PORT_B_MASK) | (g_timeslice_b[g_bitpos] & PORT_B_MASK);
+  PORTC = (PORTC & ~PORT_C_MASK) | (g_timeslice_c[g_bitpos] & PORT_C_MASK);
+  PORTD = (PORTD & ~PORT_D_MASK) | (g_timeslice_d[g_bitpos] & PORT_D_MASK);
+
+  TCNT2 = 0;  // Reset Timer2 counter for next time slice
+
+  // Double OCR2A for the next time slice to implement Binary Code Modulation.
+  // Time slice durations will be proportional to 2^0, 2^1, 2^2, ..., 2^7, then
+  // repeat.
+  OCR2A <<= 1;
+  if (g_bitpos == 0) {
+    OCR2A = 1;  // Reset OCR2A to 1 at the start of each 8-bit BCM cycle
+  }
+
+  if (g_bitpos == 7) {
+    g_tick = 1;  // Signal the end of an 8-bit BCM cycle (purpose of g_tick
+                 // needs clarification)
   }
 }
 
-void showError(uint8_t times) {
-  uint8_t old_ddrd4_bit = DDRD & _BV(DDD4);
-  DDRD |= _BV(DDD4);
-
-  for (uint8_t i = 0; i < 5; i++) {
-    PORTD &= ~_BV(PORTD4);
-    delay(500);
-    PORTD |= _BV(PORTD4);
-    delay(500);
-  }
-
-  if (old_ddrd4_bit) {
-    DDRD |= _BV(DDD4);  // If original bit was 1, set it back to 1
-  } else {
-    DDRD &= ~_BV(DDD4);  // If original bit was 0, set it back to 0
-  }
-}
-
-// ---
-// accelerometer/I2C functions
+/**
+ * @section accelerometer/tilt
+ */
 
 int16_t X_ACCELERATION = 0;
 int16_t Y_ACCELERATION = 0;
@@ -455,8 +531,6 @@ void updateAcceleration() {
 #endif
 }
 
-// TODO: write getMagnitude function
-
 uint16_t getAngle(bool reset) {
   if (NO_LIS) {
     return 0;
@@ -465,8 +539,6 @@ uint16_t getAngle(bool reset) {
   int16_t &x_value = X_ACCELERATION;
   int16_t &y_value = Y_ACCELERATION;
 
-  constexpr uint16_t ACCEL_ANGLE_OFFSET =
-      0x3fff;  // based on the orientation of the chip on the board
   static uint32_t accelCounter = 0;
   static uint16_t roll = 0;
   static int32_t xFilter, yFilter;
@@ -514,6 +586,7 @@ void sortDescending(int16_t *a, int16_t *b, int16_t *c) {
   }
 }
 
+// useful to get absolute magnitude
 uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
   x = abs(x);
   y = abs(y);
@@ -522,6 +595,19 @@ uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
   sortDescending(&x, &y, &z);
 
   return max(x, (5 * x + 6 * y + 15 * z) >> 4);
+}
+
+uint16_t approx_hypot(int16_t x, int16_t y) {
+  x = abs(x);
+  y = abs(y);
+
+  if (x > y) {
+    y >>= 2;
+  } else {
+    x >>= 2;
+  }
+
+  return x + y;
 }
 
 bool getClick() {
@@ -831,50 +917,3 @@ uint8_t readByteFromAccel(uint8_t addr) {
 }
 
 void clearInterrupt() { readByteFromAccel(LIS3DH_INT1_SRC); }
-
-// needs to be refactored
-void goToSleep() {
-#if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
-#error "not implemented"
-#endif
-  cli();
-  stop_timer();
-  stop_leds();
-  setupAccelSleep();
-  // assumes interrupt handler is already set up
-  while (~PIND & INT_PIN_BM) {
-  }
-  sei();
-  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-  setupAccelReawaken();
-  led_init();
-  start_timer();
-}
-
-// ---
-// interrupt/timer stuff
-
-ISR(TIMER2_COMPA_vect) {
-  g_bitpos++;
-  g_bitpos &= 7;
-
-  // Update all ports with their current timeslice, preserving unused pins
-  PORTB = (PORTB & ~PORT_B_MASK) | (g_timeslice_b[g_bitpos] & PORT_B_MASK);
-  PORTC = (PORTC & ~PORT_C_MASK) | (g_timeslice_c[g_bitpos] & PORT_C_MASK);
-  PORTD = (PORTD & ~PORT_D_MASK) | (g_timeslice_d[g_bitpos] & PORT_D_MASK);
-
-  TCNT2 = 0;  // Reset Timer2 counter for next time slice
-
-  // Double OCR2A for the next time slice to implement Binary Code Modulation.
-  // Time slice durations will be proportional to 2^0, 2^1, 2^2, ..., 2^7, then
-  // repeat.
-  OCR2A <<= 1;
-  if (g_bitpos == 0) {
-    OCR2A = 1;  // Reset OCR2A to 1 at the start of each 8-bit BCM cycle
-  }
-
-  if (g_bitpos == 7) {
-    g_tick = 1;  // Signal the end of an 8-bit BCM cycle (purpose of g_tick
-                 // needs clarification)
-  }
-}
