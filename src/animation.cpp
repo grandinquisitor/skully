@@ -191,7 +191,11 @@ bool accel_test_animation(uint8_t brightness[], uint16_t roll, bool click, bool 
 
   for (uint8_t i = 0; i < NUM_LEDS; ++i) {
     if (i != bottomLed) {
-      brightness[i] = 0;
+      if (click) {
+        brightness[i] = 1;
+      } else {
+        brightness[i] = 0;
+      }
     } else {
       brightness[i] = 64;
     }
