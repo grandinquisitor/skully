@@ -42,4 +42,14 @@ void goToSleep();
 
 void wakeUp();
 
+bool setupAccel();
+
+void readFromAccel(uint8_t addr, uint8_t* output);
+
+uint8_t readRegionFromAccel(uint8_t addr, uint8_t* output, uint8_t length);
+
+uint8_t readByteFromAccel(uint8_t addr);
+
+void setupInterrupt();
+
 #endif // __MAIN_H__

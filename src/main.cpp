@@ -14,7 +14,7 @@
 #include "util.h"
 
 #define TIMER_PRESCALER 64
-#define FRAME_INTERVAL_MS 128
+#define FRAME_INTERVAL_MS 64
 
 // Sum of all BCM time slice durations (each slice is OCR2A+1 ticks)
 // 2 + 3 + 5 + 9 + 17 + 33 + 65 + 129 = 263
@@ -41,17 +41,37 @@
 #define I2C_SPEED I2C_SPEED_100KHZ
 #endif
 
-// goal: see what changes reduce the jittering
-// it does
+#ifdef I2C_SPEED
+#if ((F_CPU / 18) < I2C_SPEED)
+#error "I2C speed too high"
+#endif
+#endif
 
-constexpr uint16_t GET_ANGLE_FREQ = 8000;
-constexpr uint16_t GET_CLICK_FREQ = 2000;
+#define TAP_DETECT_METHOD_CALCULATE 1
+#define TAP_DETECT_METHOD_PULSE 2
+#define TAP_DETECT_METHOD_LATCH 3
+#define TAP_DETECT_METHOD_CLICK_POLL 4
+#define TAP_DETECT_METHOD TAP_DETECT_METHOD_PULSE
 
-// TODO:
-// try in platformIO
-// why is the framerate so slow with the accelerometer turned on?
-// does millis() not work? (i.e. countdown not working)
-// doesn't that run in timer0?
+#if TAP_DETECT_METHOD == TAP_DETECT_METHOD_CALCULATE
+#define READ_Z
+#endif
+
+#define SAVE_AND_DISABLE_INTERRUPTS()            \
+  bool interruptWasEnabled = SREG & _BV(SREG_I); \
+  if (interruptWasEnabled) {                     \
+    cli();                                       \
+  }
+
+#define RESTORE_INTERRUPTS() \
+  if (interruptWasEnabled) { \
+    sei();                   \
+  }
+
+constexpr uint16_t GET_ANGLE_FREQ = 100;
+constexpr uint16_t GET_CLICK_FREQ = 200;
+
+constexpr uint8_t INT_PIN_BM = _BV(PORTD2);
 
 enum class BLEND_LEVEL { BLEND_0, BLEND_50, BLEND_75, BLEND_87_5 };
 
@@ -126,15 +146,11 @@ bool NO_LIS = false;
 constexpr uint8_t CLICKTHRESHHOLD = 20;
 constexpr uint8_t ACCEL_ADDRESS = 0x19;
 
-// void led_init(void);
-// void led_encode_timeslices(uint8_t intensity[]);
-// void update_led_pattern(uint8_t brightness[]);
-// void power_config();
+volatile bool gotInterrupt = 0;
 
 void setup() {
-
 #if F_CPU == 1000000UL
-// assume hardware presaler is set
+// assume hardware presaler fuse bit is set
 #elif F_CPU == 2000000UL
   clock_prescale_set(clock_div_4);
 #elif F_CPU == 4000000UL
@@ -161,28 +177,25 @@ void setup() {
     Wire.begin();
 
 #ifdef I2C_SPEED
-#if ((F_CPU / 18) < I2C_SPEED)
-#error "I2C speed too high"
-#else
     Wire.setClock(I2C_SPEED);
 #endif
-#endif
 
-    if (!connect_accel()) {
+    // new idea:
+    // try switching the code that reads it
+
+    if (setupAccel()) {
+      NO_LIS = false;
+#if TAP_DETECT_METHOD == TAP_DETECT_METHOD_PULSE
+      setupInterrupt();
+#endif
+    } else {
+      NO_LIS = true;
       showError(5);
     }
   }
 
   start_timer();
 }
-
-// TODO:
-// move setup timer out of led setup
-// fix timing: try vs. without accel
-// does it pull every time you call getAngle()?
-
-// problem:
-// 
 
 void loop() {
   static uint8_t g_frame_counter = 0;
@@ -194,20 +207,12 @@ void loop() {
   g_tick = 0;  // consume the tick
 
   // Update animation based on calculated interval
-  // problem: this should run once per ms in order to match the old system
   if (++g_frame_counter >= BCM_CYCLES_PER_ANIMATION) {
     g_frame_counter = 0;
     bool animation_off = calculate_next_frame(brightness, getAngle(accel_reset),
-                                          getClick(), animation_reset);
+                                              getClick(), animation_reset);
     animation_reset = false;
     accel_reset = false;
-
-    // test click is not latched on (works as expected)
-    // if (getClick()) {
-    //   brightness[0] = 64;
-    // } else {
-    //   brightness[0] >>= 1;
-    // }
 
     if (animation_off && !NO_LIS) {
       goToSleep();
@@ -265,10 +270,7 @@ void stop_leds(void) {
 }
 
 void start_timer() {
-  bool interruptWasEnabled = SREG & _BV(SREG_I);
-  if (interruptWasEnabled) {
-    cli();
-  }
+  SAVE_AND_DISABLE_INTERRUPTS();
 
 #if TIMER_USED != 2
 #error "selected timer not implemented"
@@ -298,9 +300,7 @@ void start_timer() {
   OCR2A = 1;
   TIMSK2 = (1 << OCIE2A);  // Enable compare match interrupt
 
-  if (interruptWasEnabled) {
-    sei();
-  }
+  RESTORE_INTERRUPTS();
 }
 
 void stop_timer() {
@@ -351,7 +351,6 @@ void other_hardware_config() {
   // sleep_bod_disable();
 
   // pinMode(2, INPUT_PULLUP);
-  constexpr uint8_t INT_PIN_BM = _BV(PORTD2);
   DDRD &= ~INT_PIN_BM;
   PORTD |= INT_PIN_BM;
 }
@@ -447,10 +446,54 @@ void showError(uint8_t times) {
   }
 }
 
+int16_t X_ACCELERATION = 0;
+int16_t Y_ACCELERATION = 0;
+int16_t Z_ACCELERATION = 0;
+
+// high resolution = 12 bits
+// normal mode = 10 bits
+// low power mode = 8 bits
+constexpr uint8_t RESOLUTION = 10;
+
+void updateAcceleration() {
+#ifdef READ_Z
+  constexpr uint8_t NUM_BYTES = 6;
+#else
+  constexpr uint8_t NUM_BYTES = 4;
+#endif
+
+  uint8_t buffer[NUM_BYTES];
+  readRegionFromAccel(LIS3DH_REG_OUT_X_L, buffer, NUM_BYTES);
+
+  int16_t x, y;
+
+  x = (int16_t)buffer[0];
+  x |= ((int16_t)buffer[1]) << 8;
+  y = (int16_t)buffer[2];
+  y |= ((int16_t)buffer[3]) << 8;
+#ifdef READ_Z
+  int16_t z = (int16_t)buffer[4];
+  z |= ((int16_t)buffer[5]) << 8;
+#endif
+
+  // note: assumes 10 bit resolution
+  constexpr uint8_t SHIFT_AMOUNT = 16 - RESOLUTION;
+  X_ACCELERATION = x >> SHIFT_AMOUNT;
+  Y_ACCELERATION = y >> SHIFT_AMOUNT;
+#ifdef READ_Z
+  Z_ACCELERATION = z >> SHIFT_AMOUNT;
+#endif
+}
+
+// TODO: write getMagnitude function
+
 uint16_t getAngle(bool reset) {
   if (NO_LIS) {
     return 0;
   }
+
+  int16_t &x_value = X_ACCELERATION;  //  lis.x;
+  int16_t &y_value = Y_ACCELERATION;  //  lis.y;
 
   constexpr uint16_t ACCEL_ANGLE_OFFSET =
       0x3fff;  // based on the orientation of the chip on the board
@@ -460,16 +503,18 @@ uint16_t getAngle(bool reset) {
 
   bool got_new_read = false;
   if (reset) {
-    lis.read();
+    // lis.read();
+    updateAcceleration();
     accelCounter = millis();  // not strictly necessary
-    xFilter = setFilterValue(lis.x);
-    yFilter = setFilterValue(lis.y);
+    xFilter = setFilterValue(x_value);
+    yFilter = setFilterValue(y_value);
     got_new_read = true;
   } else {
     if (countDown(&accelCounter, GET_ANGLE_FREQ)) {
-      lis.read();
-      smoothInt(lis.x, 1, &xFilter);
-      smoothInt(lis.y, 1, &yFilter);
+      //      lis.read();
+      updateAcceleration();
+      smoothInt(x_value, 1, &xFilter);
+      smoothInt(y_value, 1, &yFilter);
       got_new_read = true;
     }
   }
@@ -482,57 +527,301 @@ uint16_t getAngle(bool reset) {
   return roll;
 }
 
+void sortDescending(int16_t *a, int16_t *b, int16_t *c) {
+  // Swap if necessary to ensure a >= b >= c
+  if (*a < *b) {
+    int16_t temp = *a;
+    *a = *b;
+    *b = temp;
+  }
+  if (*a < *c) {
+    int16_t temp = *a;
+    *a = *c;
+    *c = temp;
+  }
+  if (*b < *c) {
+    int16_t temp = *b;
+    *b = *c;
+    *c = temp;
+  }
+}
+
+uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
+  x = abs(x);
+  y = abs(y);
+  z = abs(z);
+
+  sortDescending(&x, &y, &z);
+
+  return max(x, (5 * x + 6 * y + 15 * z) >> 4);
+}
+
 bool getClick() {
   if (NO_LIS) {
     return true;
   }
+
+#if TAP_DETECT_METHOD == TAP_DETECT_METHOD_CLICK_POLL
+  // detect by polling the clicksrc register
 
   static uint32_t accelCounter = 0;
 
   if (countDown(&accelCounter, GET_CLICK_FREQ)) {
     uint8_t click = lis.getClick();
     if (!(click == 0 || !(click & 0x30))) {
-      // not necessary to clear, based on the configuration
+      // only necessary to call this if we are using the latching interrupt
       // clearInterrupt();
       return true;
     }
   }
   return false;
+
+#elif TAP_DETECT_METHOD == TAP_DETECT_METHOD_CALCULATE
+#error "not implemented"
+  // enable READ_Z
+  // choose a threshold
+  // return approx_hypot(X_ACCELERATION, Y_ACCELERATION, Z_ACCELERATION) >
+  // threshold;
+
+#elif TAP_DETECT_METHOD == TAP_DETECT_METHOD_PULSE
+  if (gotInterrupt) {
+    gotInterrupt = false;
+    return true;
+  } else {
+  return false;
+  }
+
+#elif TAP_DETECT_METHOD == TAP_DETECT_METHOD_LATCH
+#error "not implemented"
+  // use the latching interrupt
+  // check if the interrupt pin is low
+  // clear interrupt by reading appropriate register
+
+#else
+#error "invalid tap detect method"
+#endif
 }
 
-// TODO: replace with proper constants and use lis3dh_reg_t for readability
-// from https://forums.adafruit.com/viewtopic.php?f=19&t=87936
+inline void sendToAccel(uint8_t addr, lis3dh_reg_t val) {
+  sendToAccel(addr, val.byte);
+}
+
+inline bool sendToAccelAndVerify(uint8_t addr, lis3dh_reg_t val) {
+  sendToAccel(addr, val.byte);
+  uint8_t byteVal = readByteFromAccel(addr);
+  return byteVal == val.byte;
+}
+
+#if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE && TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
 void configInterrupts() {
-  // configurations for control registers
-  sendToAccel(0x20,
-              0x57);  // Write 57h into CTRL_REG1;      // Turn on the sensor,
-                      // enable X, Y, Z axes with ODR = 100Hz normal mode.
-  sendToAccel(0x21, 0x09);  // Write 09h into CTRL_REG2;      // High-pass
-                            // filter (HPF) enabled
-  sendToAccel(0x22, 0x40);  // Write 40h into CTRL_REG3;      // ACC AOI1
-                            // interrupt signal is routed to INT1 pin.
-  sendToAccel(0x23,
-              0x00);  // Write 00h into CTRL_REG4;      // Full Scale = +/-2 g
-  sendToAccel(
-      0x24,
-      0x00);  // Write 08h into CTRL_REG5;      // Default value is 00 for no
-              // latching. Interrupt signals on INT1 pin is not latched.
-  // Users don’t need to read the INT1_SRC register to clear the interrupt
-  // signal.
-  sendToAccel(0x25, 0x02);  // supposed to invert the signal
+  // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
+  sendToAccel(LIS3DH_CTRL_REG1,
+              lis3dh_reg_t{.ctrl_reg1 = {.xen = 1,
+                                         .yen = 1,
+                                         .zen = 1,
+                                         .lpen = 0,
+                                         .odr = LIS3DH_ODR_100Hz}});
 
-  // configurations for wakeup and motionless detection
-  sendToAccel(0x32, 0x10);  // Write 10h into INT1_THS;          // Threshold
-                            // (THS) = 16LSBs * 15.625mg/LSB = 250mg.
-  sendToAccel(0x33, 0x00);  // Write 00h into INT1_DURATION;     // Duration =
-                            // 1LSBs * (1/10Hz) = 0.1s.
-  // readRegister();  //Dummy read to force the HP filter to set reference
-  // acceleration/tilt value
-  sendToAccel(0x30, 0x2A);  // Write 2Ah into INT1_CFG;          // Enable XHIE,
-                            // YHIE, ZHIE interrupt generation, OR logic.
+  // Configure CTRL_REG2: High-pass filter enabled for IA1
+  sendToAccel(LIS3DH_CTRL_REG2,
+              lis3dh_reg_t{.ctrl_reg2 = {.hp = 0x1,  // HP_IA1 enabled
+                                         .fds = 1,   // Filtered data enabled
+                                         .hpcf = LIS3DH_AGGRESSIVE,
+                                         .hpm = LIS3DH_NORMAL_WITH_RST}});
+
+  // Configure CTRL_REG3: Route IA1 interrupt to INT1
+  sendToAccel(LIS3DH_CTRL_REG3, lis3dh_reg_t{.ctrl_reg3 = {.not_used_01 = 0,
+                                                           .i1_overrun = 0,
+                                                           .i1_wtm = 0,
+                                                           .i1_321da = 0,
+                                                           .i1_zyxda = 0,
+                                                           .i1_ia2 = 0,
+                                                           .i1_ia1 = 1,
+                                                           .i1_click = 0}});
+
+  // Configure CTRL_REG4: Full scale ±2g, High-resolution disabled
+  sendToAccel(LIS3DH_CTRL_REG4, lis3dh_reg_t{.ctrl_reg4 = {.sim = 0,
+                                                           .st = 0,
+                                                           .hr = 0,
+                                                           .fs = LIS3DH_2g,
+                                                           .ble = 0,
+                                                           .bdu = 0}});
+
+  // Configure CTRL_REG5: No latching interrupts
+  sendToAccel(LIS3DH_CTRL_REG5, lis3dh_reg_t{.ctrl_reg5 = {.d4d_int2 = 0,
+                                                           .lir_int2 = 0,
+                                                           .d4d_int1 = 0,
+                                                           .lir_int1 = 0,
+                                                           .not_used_01 = 0,
+                                                           .fifo_en = 0,
+                                                           .boot = 0}});
+
+  // Configure CTRL_REG6: Interrupt polarity (active low)
+  sendToAccel(LIS3DH_CTRL_REG6, lis3dh_reg_t{.ctrl_reg6 = {.not_used_01 = 0,
+                                                           .int_polarity = 1,
+                                                           .not_used_02 = 0,
+                                                           .i2_act = 0,
+                                                           .i2_boot = 0,
+                                                           .i2_ia2 = 0,
+                                                           .i2_ia1 = 0,
+                                                           .i2_click = 0}});
+
+  // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
+  sendToAccel(LIS3DH_INT1_THS,
+              lis3dh_reg_t{.int1_ths = {.ths = 1, .not_used_01 = 0}});
+
+  // Configure INT1_DURATION: Duration = 0.1s
+  sendToAccel(LIS3DH_INT1_DURATION,
+              lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
+
+  // Configure INT1_CFG: Enable XHIE, YHIE, ZHIE with OR logic
+  sendToAccel(LIS3DH_INT1_CFG, lis3dh_reg_t{.int1_cfg = {.xlie = 0,
+                                                         .xhie = 1,
+                                                         .ylie = 0,
+                                                         .yhie = 1,
+                                                         .zlie = 0,
+                                                         .zhie = 1,
+                                                         ._6d = 0,
+                                                         .aoi = 0}});
 }
 
-void disableHpf() { sendToAccel(0x21, 0x00); }
+void disableHpf() {
+  sendToAccel(
+      LIS3DH_CTRL_REG2,
+      lis3dh_reg_t{.ctrl_reg2 = {.hp = 0, .fds = 0, .hpcf = 0, .hpm = 0}});
+}
+#endif
+
+ISR(INT0_vect) {
+  gotInterrupt = true;
+}
+
+void setupInterrupt() {
+  SAVE_AND_DISABLE_INTERRUPTS();
+
+  // Set INT0 to trigger on FALLING EDGE
+  EICRA |= (1 << ISC01);  // ISC01=1, ISC00=0
+  EICRA &= ~(1 << ISC00);
+
+  // Enable INT0
+  EIMSK |= (1 << INT0);
+
+  // Enable INT0
+  EIMSK |= (1 << INT0);
+
+  RESTORE_INTERRUPTS();
+}
+
+bool setupAccel() {
+  constexpr lis3dh_odr_t ODR = LIS3DH_ODR_100Hz;
+  constexpr lis3dh_fs_t MAGNITUDE = LIS3DH_2g;
+
+  _delay_ms(5);  // app note specifies it takes 5ms to boot (and starts in power
+                 // down mode)
+
+  // unsure of the intended difference between LIS3DH_WHO_AM_I and
+  // LIS3DH_REG_WHOAMI
+  if (readByteFromAccel(LIS3DH_REG_WHOAMI) != LIS3DH_ID) {
+    return false;
+  }
+
+
+  // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
+  sendToAccel(
+      LIS3DH_CTRL_REG1,
+      lis3dh_reg_t{
+          .ctrl_reg1 = {.xen = 1, .yen = 1, .zen = 1, .lpen = 0, .odr = ODR}});
+
+  _delay_ms(2);  // app note says it takes a few ms to change the ODR
+  // this may not be the exact value
+
+  // Configure CTRL_REG2: High-pass filter enabled for IA1
+  sendToAccel(LIS3DH_CTRL_REG2,                     // lis3dh_reg_t{.byte = 0});
+              lis3dh_reg_t{.ctrl_reg2 = {.hp = 1,   // HP_IA1 enabled
+                                         .fds = 0,  // Filtered data
+                                         .hpcf = LIS3DH_AGGRESSIVE,
+                                         .hpm = LIS3DH_NORMAL_WITH_RST}});
+
+  // Configure CTRL_REG3: Route IA1 interrupt to INT1
+  sendToAccel(LIS3DH_CTRL_REG3,
+              lis3dh_reg_t{.ctrl_reg3 = {.not_used_01 = 0,
+                                         .i1_overrun = 0,
+                                         .i1_wtm = 0,
+                                         .i1_321da = 0,
+                                         .i1_zyxda = 0,
+                                         .i1_ia2 = 0,
+                                         .i1_ia1 = 1,  // set int1 here
+                                         .i1_click = 0}});
+
+  // Configure CTRL_REG4: Full scale ±2g, High-resolution disabled
+  sendToAccel(LIS3DH_CTRL_REG4, lis3dh_reg_t{.ctrl_reg4 = {.sim = 0,
+                                                           .st = 0,
+                                                           .hr = 0,
+                                                           .fs = MAGNITUDE,
+                                                           .ble = 0,
+                                                           .bdu = 1}});
+
+  // Configure CTRL_REG5: No latching interrupts
+  sendToAccel(LIS3DH_CTRL_REG5, lis3dh_reg_t{.ctrl_reg5 = {.d4d_int2 = 0,
+                                                           .lir_int2 = 0,
+                                                           .d4d_int1 = 0,
+                                                           .lir_int1 = 0,
+                                                           .not_used_01 = 0,
+                                                           .fifo_en = 0,
+                                                           .boot = 0}});
+
+  // Configure CTRL_REG6: Interrupt polarity (active low)
+  sendToAccel(LIS3DH_CTRL_REG6, lis3dh_reg_t{.ctrl_reg6 = {.not_used_01 = 0,
+                                                           .int_polarity = 1,
+                                                           .not_used_02 = 0,
+                                                           .i2_act = 0,
+                                                           .i2_boot = 0,
+                                                           .i2_ia2 = 0,
+                                                           .i2_ia1 = 0,
+                                                           .i2_click = 0}});
+
+  // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
+  sendToAccel(LIS3DH_INT1_THS,
+              lis3dh_reg_t{.int1_ths = {.ths = 16, .not_used_01 = 0}});
+
+  // Configure INT1_DURATION: Duration = 0.1s
+  sendToAccel(LIS3DH_INT1_DURATION,
+              lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
+
+  // Configure INT1_CFG: Enable XHIE, YHIE, ZHIE with OR logic
+  sendToAccel(LIS3DH_INT1_CFG, lis3dh_reg_t{.int1_cfg = {.xlie = 0,
+                                                         .xhie = 1,
+                                                         .ylie = 0,
+                                                         .yhie = 1,
+                                                         .zlie = 0,
+                                                         .zhie = 1,
+                                                         ._6d = 0,
+                                                         .aoi = 0}});
+
+  return true;
+}
+
+void setupLowPowerAccel() {
+  constexpr lis3dh_odr_t ODR = LIS3DH_ODR_25Hz;
+  constexpr lis3dh_fs_t MAGNITUDE = LIS3DH_2g;
+
+// enable low power mode
+  sendToAccel(
+      LIS3DH_CTRL_REG1,
+      lis3dh_reg_t{
+          .ctrl_reg1 = {.xen = 1, .yen = 1, .zen = 1, .lpen = 1, .odr = ODR}});
+
+  _delay_ms(2);  // app note says it takes a few ms to change the ODR
+  // this may not be the exact value
+
+  // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
+  sendToAccel(LIS3DH_INT1_THS,
+              lis3dh_reg_t{.int1_ths = {.ths = 16, .not_used_01 = 0}});
+
+  // Configure INT1_DURATION: Duration = 0.1s
+  sendToAccel(LIS3DH_INT1_DURATION,
+              lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
+}
 
 void sendToAccel(uint8_t addr, uint8_t val) {
   Wire.beginTransmission(ACCEL_ADDRESS);
@@ -541,33 +830,59 @@ void sendToAccel(uint8_t addr, uint8_t val) {
   Wire.endTransmission();  // stop transmitting
 }
 
-void readFromAccel(uint8_t addr, uint8_t *output) {
+// read multiple bytes
+uint8_t readRegionFromAccel(uint8_t addr, uint8_t *output, uint8_t length) {
   Wire.beginTransmission(ACCEL_ADDRESS);
+  if (length > 1) {
+    addr |= 0x80;  // set auto-increment bit
+  }
   Wire.write(addr);
+  uint8_t i = 0;
   if (Wire.endTransmission() != 0) {
     *output = 0;
+  } else {
+    Wire.requestFrom(ACCEL_ADDRESS, length);
+    while ((Wire.available()) &&
+           (i < length)) {  // slave may send less than requested
+      *output = Wire.read();
+      output++;
+      i++;
+    }
   }
-  Wire.requestFrom(ACCEL_ADDRESS, 1);
-  while (Wire.available())  // slave may send less than requested
-  {
-    *output = Wire.read();  // receive a byte as a proper uint8_t
-  }
+  return i;
 }
 
-void clearInterrupt() {
+void readFromAccel(uint8_t addr, uint8_t *output) {
+  readRegionFromAccel(addr, output, 1);
+}
+
+uint8_t readByteFromAccel(uint8_t addr) {
   uint8_t dataRead;
-  readFromAccel(LIS3DH_INT1_SRC, &dataRead);
+  readFromAccel(addr, &dataRead);
+  return dataRead;
 }
 
+void clearInterrupt() { readByteFromAccel(LIS3DH_INT1_SRC); }
+
+// needs to be refactored
 void goToSleep() {
+#if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
+#error "not implemented"
+#endif
+  cli();
   stop_timer();
   stop_leds();
-  configInterrupts();  // only really needs to be called once
+  setupLowPowerAccel();
+  // assumes interrupt handler is already set up
+  while (~PIND & INT_PIN_BM) {}
+  sei();
+  // configInterrupts();  // only really needs to be called once
   // TODO: set the accel to a lower power mode
-  attachInterrupt(0, wakeUp, LOW);
+  // attachInterrupt(0, wakeUp, LOW);
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-  detachInterrupt(0);
-  disableHpf();
+  // detachInterrupt(0);
+  // disableHpf();
+  setupAccel();  // restore to high power mode by just re-running initial setup
   led_init();
   start_timer();
 }
