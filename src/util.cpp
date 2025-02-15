@@ -6,11 +6,11 @@
 
 #define USE_PROGMEM 1
 
-constexpr uint8_t
+static constexpr uint8_t
 #if USE_PROGMEM
     PROGMEM
 #endif
-        gamma8[] = {
+        GAMMA8[] = {
             0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
             0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
             0,   0,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
@@ -36,7 +36,7 @@ uint8_t gammaCorrect(uint8_t brightness) {
 #if USE_PROGMEM
   return pgm_read_byte(&gamma8[brightness]);
 #else
-  return gamma8[brightness];
+  return GAMMA8[brightness];
 #endif
 }
 
@@ -75,3 +75,29 @@ uint8_t decr(uint8_t val, uint8_t sub, uint8_t mod) {
     return val - sub;
   }
 }
+
+void sort_descending(int16_t *a, int16_t *b, int16_t *c) {
+  // Swap if necessary to ensure a >= b >= c
+  if (*a < *b) {
+    int16_t temp = *a;
+    *a = *b;
+    *b = temp;
+  }
+  if (*a < *c) {
+    int16_t temp = *a;
+    *a = *c;
+    *c = temp;
+  }
+  if (*b < *c) {
+    int16_t temp = *b;
+    *b = *c;
+    *c = temp;
+  }
+}
+
+static constexpr uint8_t BITS8[8] = {_BV(0), _BV(1), _BV(2), _BV(3),
+                                     _BV(4), _BV(5), _BV(6), _BV(7)};
+
+// equivalent to _BV() except the value is a LUT rather than an actual bit shift
+// operation which should be faster
+uint8_t bit_cache(uint8_t b) { return BITS8[b]; }

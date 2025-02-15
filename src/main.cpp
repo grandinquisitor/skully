@@ -211,7 +211,7 @@ void setup() {
 #endif
     } else {
       g_no_accelerometer = true;
-      showError(5);
+      show_error(5);
     }
   }
 
@@ -231,12 +231,12 @@ void loop() {
   if (++s_frame_counter >= BCM_CYCLES_PER_ANIMATION) {
     s_frame_counter = 0;
     bool animation_off = calculate_next_frame(
-        g_brightness, get_angle(s_accel_reset), getClick(), s_animation_reset);
+        g_brightness, get_angle(s_accel_reset), get_click(), s_animation_reset);
     s_animation_reset = false;
     s_accel_reset = false;
 
     if (animation_off && !g_no_accelerometer) {
-      goToSleep();
+      go_to_sleep();
       s_animation_reset = true;
     }
   }
@@ -265,7 +265,7 @@ void resetI2CBus() {
   PORTC |= _BV(PC5);
 }
 
-void showError(uint8_t times) {
+void show_error(uint8_t times) {
   uint8_t old_ddrd4_bit = DDRD & _BV(DDD4);
   DDRD |= _BV(DDD4);
 
@@ -405,7 +405,7 @@ void test_delay() {
   }
 }
 
-void goToSleep() {
+void go_to_sleep() {
 #if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE
 #error "not implemented"
 #endif
@@ -492,16 +492,16 @@ ISR(TIMER2_COMPA_vect) {
  * @section accelerometer/tilt
  */
 
-int16_t X_ACCELERATION = 0;
-int16_t Y_ACCELERATION = 0;
-int16_t Z_ACCELERATION = 0;
+int16_t g_x_acceleration = 0;
+int16_t g_y_acceleration = 0;
+int16_t g_z_acceleration = 0;
 
 // high resolution = 12 bits
 // normal mode = 10 bits
 // low power mode = 8 bits
 constexpr uint8_t RESOLUTION = 10;
 
-void updateAcceleration() {
+void update_acceleration() {
 #ifdef READ_Z
   constexpr uint8_t NUM_BYTES = 6;
 #else
@@ -524,10 +524,11 @@ void updateAcceleration() {
 
   // note: assumes 10 bit resolution
   constexpr uint8_t SHIFT_AMOUNT = 16 - RESOLUTION;
-  X_ACCELERATION = x >> SHIFT_AMOUNT;
-  Y_ACCELERATION = y >> SHIFT_AMOUNT;
+  g_x_acceleration = x >> SHIFT_AMOUNT;
+  g_y_acceleration = y >> SHIFT_AMOUNT;
 #ifdef READ_Z
-  Z_ACCELERATION = z >> SHIFT_AMOUNT;
+  g_z_acceleration = z >> SHIFT_AMOUNT;
+#endif
 #endif
 }
 
@@ -536,8 +537,8 @@ uint16_t get_angle(bool reset) {
     return 0;
   }
 
-  int16_t &x_value = X_ACCELERATION;
-  int16_t &y_value = Y_ACCELERATION;
+  int16_t &x_value = g_x_acceleration;
+  int16_t &y_value = g_y_acceleration;
 
   static uint32_t s_accel_counter = 0;
   static uint16_t s_angle = 0;
@@ -545,14 +546,14 @@ uint16_t get_angle(bool reset) {
 
   bool got_new_read = false;
   if (reset) {
-    updateAcceleration();
+    update_acceleration();
     s_accel_counter = millis();  // not strictly necessary
     s_x_filter = setFilterValue(x_value);
     s_y_filter = setFilterValue(y_value);
     got_new_read = true;
   } else {
     if (countDown(&s_accel_counter, GET_ANGLE_FREQ)) {
-      updateAcceleration();
+      update_acceleration();
       smoothInt(x_value, 1, &s_x_filter);
       smoothInt(y_value, 1, &s_y_filter);
       got_new_read = true;
@@ -568,32 +569,13 @@ uint16_t get_angle(bool reset) {
   return s_angle;
 }
 
-void sortDescending(int16_t *a, int16_t *b, int16_t *c) {
-  // Swap if necessary to ensure a >= b >= c
-  if (*a < *b) {
-    int16_t temp = *a;
-    *a = *b;
-    *b = temp;
-  }
-  if (*a < *c) {
-    int16_t temp = *a;
-    *a = *c;
-    *c = temp;
-  }
-  if (*b < *c) {
-    int16_t temp = *b;
-    *b = *c;
-    *c = temp;
-  }
-}
-
 // useful to get absolute magnitude
 uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
   x = abs(x);
   y = abs(y);
   z = abs(z);
 
-  sortDescending(&x, &y, &z);
+  sort_descending(&x, &y, &z);
 
   return max(x, (5 * x + 6 * y + 15 * z) >> 4);
 }
@@ -611,7 +593,7 @@ uint16_t approx_hypot(int16_t x, int16_t y) {
   return x + y;
 }
 
-bool getClick() {
+bool get_click() {
   if (g_no_accelerometer) {
     return true;
   }
@@ -635,7 +617,7 @@ bool getClick() {
 #error "not implemented"
   // enable READ_Z
   // choose a threshold
-  // return approx_hypot(X_ACCELERATION, Y_ACCELERATION, Z_ACCELERATION) >
+  // return approx_hypot(g_x_acceleration, g_y_acceleration, g_z_acceleration) >
   // threshold;
 
 #elif TAP_DETECT_METHOD == TAP_DETECT_METHOD_PULSE

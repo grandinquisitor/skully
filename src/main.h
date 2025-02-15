@@ -24,11 +24,11 @@ bool connect_accel();
 
 void test_delay();
 
-void showError(uint8_t);
+void show_error(uint8_t);
 
 uint16_t get_angle(bool reset);
 
-bool getClick();
+bool get_click();
 
 void configInterrupts();
 
@@ -38,7 +38,7 @@ void send_to_accel(uint8_t addr, uint8_t val);
 
 void clear_interrupt();
 
-void goToSleep();
+void go_to_sleep();
 
 void wakeUp();
 
