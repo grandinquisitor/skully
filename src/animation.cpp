@@ -23,40 +23,40 @@ constexpr BlendMode BLEND_MODE = BlendMode::BLEND_87_5;
 
 bool calculate_next_frame(uint8_t brightness[], uint16_t roll, bool click,
                           bool reset) {
-  static uint32_t directionRegister = 0;
-  static uint8_t sparking = DEFAULT_SPARKING;
+  static uint32_t s_direction_register = 0;
+  static uint8_t s_sparking = DEFAULT_SPARKING;
 
-  uint8_t bottomLed = map(roll, 0, 0xffff, 0, NUM_LEDS);
-  // uint8_t topLed = addmod8(bottomLed, (NUM_LEDS / 2), NUM_LEDS);
+  uint8_t bottom_led = map(roll, 0, 0xffff, 0, NUM_LEDS);
+  // uint8_t topLed = addmod8(bottom_led, (NUM_LEDS / 2), NUM_LEDS);
 
-  directionRegister = 0;
+  s_direction_register = 0;
   for (uint8_t i = 0; i < NUM_LEDS / 2; ++i) {
-    bitSet(directionRegister, addmod8(bottomLed, i, NUM_LEDS));
+    bitSet(s_direction_register, addmod8(bottom_led, i, NUM_LEDS));
   }
 
-  static uint32_t lastForcedSpark = 0;
-  static uint32_t wokeAgo = 0;
+  static uint32_t last_forced_spark = 0;
+  static uint32_t woke_ago = 0;
   constexpr uint32_t WOKE_AGO_TIMEOUT = 2500;
   constexpr uint32_t FORCED_SPARK_LEVEL1 = 400 * 6;
   constexpr uint32_t FORCED_SPARK_LEVEL2 = 5000 * 6;
   constexpr uint32_t FORCED_SPARK_LEVEL3 = 60000;
-  bool sparkNow = false;
+  bool spark_now = false;
   uint32_t now = millis();
   if (click || reset) {
-    sparkNow = true;
-    lastForcedSpark = now;
+    spark_now = true;
+    last_forced_spark = now;
     if (reset) {
-      wokeAgo = 0;
+      woke_ago = 0;
     }
-  } else if (now - lastForcedSpark < FORCED_SPARK_LEVEL1) {
-    sparkNow = true;
-  } else if (now - wokeAgo < WOKE_AGO_TIMEOUT) {
-    sparkNow = true;
-  } else if (now - lastForcedSpark < FORCED_SPARK_LEVEL2) {
-    sparking = map(now - lastForcedSpark, FORCED_SPARK_LEVEL1,
+  } else if (now - last_forced_spark < FORCED_SPARK_LEVEL1) {
+    spark_now = true;
+  } else if (now - woke_ago < WOKE_AGO_TIMEOUT) {
+    spark_now = true;
+  } else if (now - last_forced_spark < FORCED_SPARK_LEVEL2) {
+    s_sparking = map(now - last_forced_spark, FORCED_SPARK_LEVEL1,
                    FORCED_SPARK_LEVEL2, 120, 50);
-  } else if (now - lastForcedSpark < FORCED_SPARK_LEVEL3) {
-    sparking = map(now - lastForcedSpark, FORCED_SPARK_LEVEL2,
+  } else if (now - last_forced_spark < FORCED_SPARK_LEVEL3) {
+    s_sparking = map(now - last_forced_spark, FORCED_SPARK_LEVEL2,
                    FORCED_SPARK_LEVEL3, 50, 10);
   } else {
     // sleep now
@@ -64,74 +64,74 @@ bool calculate_next_frame(uint8_t brightness[], uint16_t roll, bool click,
   }
 
   // Array of temperature readings at each simulation cell
-  static uint8_t heat[NUM_LEDS];
+  static uint8_t s_heat[NUM_LEDS];
 
   // Step 1.  Cool down every cell a little
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
-    //    heat[i] = qsub8(heat[i],  random8(0, ((((uint16_t)
+    //    s_heat[i] = qsub8(s_heat[i],  random8(0, ((((uint16_t)
     //    lerp8by8(MIN_COOLING, MAX_COOLING, currentCooling)) * 10) / NUM_LEDS)
     //    + 2));
-    heat[i] = qsub8(heat[i], random8(0, ((COOLING * 10) / NUM_LEDS) + 2));
+    s_heat[i] = qsub8(s_heat[i], random8(0, ((COOLING * 10) / NUM_LEDS) + 2));
   }
 
   // right side
   for (uint8_t k = 0; k < NUM_LEDS; ++k) {
-    if (!bitRead(directionRegister, k)) {
+    if (!bitRead(s_direction_register, k)) {
       uint8_t neighbor1 = addmod8(k, 1, NUM_LEDS);
-      neighbor1 = !bitRead(directionRegister, neighbor1) ? heat[neighbor1] : 0;
+      neighbor1 = !bitRead(s_direction_register, neighbor1) ? s_heat[neighbor1] : 0;
 
       uint8_t neighbor2 = addmod8(k, 2, NUM_LEDS);
-      neighbor2 = !bitRead(directionRegister, neighbor2) ? heat[neighbor2] : 0;
+      neighbor2 = !bitRead(s_direction_register, neighbor2) ? s_heat[neighbor2] : 0;
 
       //      heat[k] = (((uint16_t) neighbor1) + neighbor2 + neighbor2) / 3;
-      heat[k] =
-          lerp8by8(heat[k], (((uint16_t)neighbor1) + neighbor2 + neighbor2) / 3,
+      s_heat[k] =
+          lerp8by8(s_heat[k], (((uint16_t)neighbor1) + neighbor2 + neighbor2) / 3,
                    BACK_FADE);
     }
   }
 
   // left side
   for (int8_t k = NUM_LEDS - 1; k >= 0; --k) {
-    if (bitRead(directionRegister, k)) {
+    if (bitRead(s_direction_register, k)) {
       uint8_t neighbor1 = decr(k, 1, NUM_LEDS);
-      neighbor1 = bitRead(directionRegister, neighbor1) ? heat[neighbor1] : 0;
+      neighbor1 = bitRead(s_direction_register, neighbor1) ? s_heat[neighbor1] : 0;
 
       uint8_t neighbor2 = decr(k, 2, NUM_LEDS);
-      neighbor2 = bitRead(directionRegister, neighbor2) ? heat[neighbor2] : 0;
+      neighbor2 = bitRead(s_direction_register, neighbor2) ? s_heat[neighbor2] : 0;
 
       //      heat[k] = (((uint16_t) neighbor1) + neighbor2 + neighbor2) / 3;
-      heat[k] =
-          lerp8by8(heat[k], (((uint16_t)neighbor1) + neighbor2 + neighbor2) / 3,
+      s_heat[k] =
+          lerp8by8(s_heat[k], (((uint16_t)neighbor1) + neighbor2 + neighbor2) / 3,
                    BACK_FADE);
     }
   }
 
-  // to involve pitch: weighted random that diffusion goes [heat - 2] * 2 vs.
-  // [heat + 1] etc.
+  // to involve pitch: weighted random that diffusion goes [s_heat - 2] * 2 vs.
+  // [s_heat + 1] etc.
 
   // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
-  if (sparkNow || random8() < sparking) {
+  if (spark_now || random8() < s_sparking) {
     uint8_t y = random8(NUM_LEDS / 6);
     if (random8() <= 160) {
-      y = addmod8(bottomLed, y, NUM_LEDS);
+      y = addmod8(bottom_led, y, NUM_LEDS);
     } else {
-      y = decr(bottomLed, y + 1, NUM_LEDS);
+      y = decr(bottom_led, y + 1, NUM_LEDS);
     }
 
-    heat[y] = qadd8(heat[y], sparkNow ? 255 : random8(160, 255));
+    s_heat[y] = qadd8(s_heat[y], spark_now ? 255 : random8(160, 255));
   }
 
   // Step 4.  Map from heat cells to LED colors
   for (int j = 0; j < NUM_LEDS; j++) {
-    blendIt(BLEND_MODE, brightness[j], gammaCorrect(heat[j]));
+    blendIt(BLEND_MODE, brightness[j], gammaCorrect(s_heat[j]));
   }
 
   return false;
 }
 
 void update_led_pattern(uint8_t brightness[]) {
-  static uint8_t phase = 0;
-  static uint8_t current_led = 0;
+  static uint8_t s_phase = 0;
+  static uint8_t s_current_led = 0;
 
   // Fade all LEDs
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
@@ -139,40 +139,40 @@ void update_led_pattern(uint8_t brightness[]) {
   }
 
   // Create a new pattern
-  switch (phase) {
+  switch (s_phase) {
     case 0:  // Single LED chase
-      brightness[current_led] = 255;
-      if (++current_led >= NUM_LEDS) {
-        current_led = 0;
-        phase = 1;
+      brightness[s_current_led] = 255;
+      if (++s_current_led >= NUM_LEDS) {
+        s_current_led = 0;
+        s_phase = 1;
       }
       break;
 
     case 1:  // Alternating LEDs
       for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        brightness[i] = (i % 2 == current_led % 2) ? 255 : 0;
+        brightness[i] = (i % 2 == s_current_led % 2) ? 255 : 0;
       }
-      if (++current_led >= 4) {
-        current_led = 0;
-        phase = 2;
+      if (++s_current_led >= 4) {
+        s_current_led = 0;
+        s_phase = 2;
       }
       break;
 
     case 2:  // Fade in/out all LEDs
       for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        brightness[i] = current_led;
+        brightness[i] = s_current_led;
       }
-      current_led += 5;
-      if (current_led >= 255) {
-        current_led = 0;
-        phase = 0;
+      s_current_led += 5;
+      if (s_current_led >= 255) {
+        s_current_led = 0;
+        s_phase = 0;
       }
       break;
   }
 }
 
-void blendIt(BlendMode blendMode, uint8_t& brightness_ref, uint8_t new_val) {
-  switch (blendMode) {
+void blendIt(BlendMode blend_mode, uint8_t& brightness_ref, uint8_t new_val) {
+  switch (blend_mode) {
     case BlendMode::BLEND_0:
       brightness_ref = new_val;
       break;
@@ -195,10 +195,10 @@ void blendIt(BlendMode blendMode, uint8_t& brightness_ref, uint8_t new_val) {
 // test whether the accelerometer works
 bool angle_test_animation(uint8_t brightness[], uint16_t roll, bool click,
                           bool reset) {
-  uint8_t bottomLed = map(roll, 0, 0xffff, 0, NUM_LEDS);
+  uint8_t bottom_led = map(roll, 0, 0xffff, 0, NUM_LEDS);
 
   for (uint8_t i = 0; i < NUM_LEDS; ++i) {
-    if (i != bottomLed) {
+    if (i != bottom_led) {
       if (click) {
         brightness[i] = 1;
       } else {

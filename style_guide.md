@@ -5,6 +5,7 @@
 ### Variables
 - Use `snake_case` for all variables: `uint8_t led_brightness`
 - Prefix global variables with `g_`: `g_tick`, `g_bitpos`
+- Prefix static variables with `s_`: `s_tick`, `s_bitpos`
 - Prefix class member variables with `m_`: `m_current_state`
 - Constants should be `UPPER_CASE`: `TIMER_PRESCALER`, `NUM_LEDS`
 

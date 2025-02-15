@@ -219,25 +219,25 @@ void setup() {
 }
 
 void loop() {
-  static uint8_t g_frame_counter = 0;
-  static bool animation_reset = true;
-  static bool accel_reset = true;
+  static uint8_t s_frame_counter = 0;
+  static bool s_animation_reset = true;
+  static bool s_accel_reset = true;
 
   while (g_tick == 0) { /*wait for g_tick to be non-zero*/
   }
   g_tick = 0;  // consume the tick
 
   // Update animation based on calculated interval
-  if (++g_frame_counter >= BCM_CYCLES_PER_ANIMATION) {
-    g_frame_counter = 0;
-    bool animation_off = calculate_next_frame(g_brightness, get_angle(accel_reset),
-                                              getClick(), animation_reset);
-    animation_reset = false;
-    accel_reset = false;
+  if (++s_frame_counter >= BCM_CYCLES_PER_ANIMATION) {
+    s_frame_counter = 0;
+    bool animation_off = calculate_next_frame(
+        g_brightness, get_angle(s_accel_reset), getClick(), s_animation_reset);
+    s_animation_reset = false;
+    s_accel_reset = false;
 
     if (animation_off && !g_no_accelerometer) {
       goToSleep();
-      animation_reset = true;
+      s_animation_reset = true;
     }
   }
 
@@ -539,32 +539,32 @@ uint16_t get_angle(bool reset) {
   int16_t &x_value = X_ACCELERATION;
   int16_t &y_value = Y_ACCELERATION;
 
-  static uint32_t accelCounter = 0;
-  static uint16_t roll = 0;
-  static int32_t xFilter, yFilter;
+  static uint32_t s_accel_counter = 0;
+  static uint16_t s_angle = 0;
+  static int32_t s_x_filter, s_y_filter;
 
   bool got_new_read = false;
   if (reset) {
     updateAcceleration();
-    accelCounter = millis();  // not strictly necessary
-    xFilter = setFilterValue(x_value);
-    yFilter = setFilterValue(y_value);
+    s_accel_counter = millis();  // not strictly necessary
+    s_x_filter = setFilterValue(x_value);
+    s_y_filter = setFilterValue(y_value);
     got_new_read = true;
   } else {
-    if (countDown(&accelCounter, GET_ANGLE_FREQ)) {
+    if (countDown(&s_accel_counter, GET_ANGLE_FREQ)) {
       updateAcceleration();
-      smoothInt(x_value, 1, &xFilter);
-      smoothInt(y_value, 1, &yFilter);
+      smoothInt(x_value, 1, &s_x_filter);
+      smoothInt(y_value, 1, &s_y_filter);
       got_new_read = true;
     }
   }
 
   if (got_new_read) {
-    roll = fxpt_atan2(getFilterValue(xFilter), getFilterValue(yFilter)) +
+    s_angle = fxpt_atan2(getFilterValue(s_x_filter), getFilterValue(s_y_filter)) +
            ACCEL_ANGLE_OFFSET;
   }
 
-  return roll;
+  return s_angle;
 }
 
 void sortDescending(int16_t *a, int16_t *b, int16_t *c) {
@@ -618,9 +618,9 @@ bool getClick() {
 #if TAP_DETECT_METHOD == TAP_DETECT_METHOD_CLICK_POLL
   // detect by polling the clicksrc register
 
-  static uint32_t accelCounter = 0;
+  static uint32_t s_accel_counter = 0;
 
-  if (countDown(&accelCounter, GET_CLICK_FREQ)) {
+  if (countDown(&s_accel_counter, GET_CLICK_FREQ)) {
     uint8_t click = 0;  // lis.getClick();
     if (!(click == 0 || !(click & 0x30))) {
       // only necessary to call this if we are using the latching interrupt
@@ -671,73 +671,73 @@ inline bool sendToAccelAndVerify(uint8_t addr, lis3dh_reg_t val) {
 void configInterrupts() {
   // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
   send_to_accel(LIS3DH_CTRL_REG1,
-              lis3dh_reg_t{.ctrl_reg1 = {.xen = 1,
-                                         .yen = 1,
-                                         .zen = 1,
-                                         .lpen = 0,
-                                         .odr = LIS3DH_ODR_100Hz}});
+                lis3dh_reg_t{.ctrl_reg1 = {.xen = 1,
+                                           .yen = 1,
+                                           .zen = 1,
+                                           .lpen = 0,
+                                           .odr = LIS3DH_ODR_100Hz}});
 
   // Configure CTRL_REG2: High-pass filter enabled for IA1
   send_to_accel(LIS3DH_CTRL_REG2,
-              lis3dh_reg_t{.ctrl_reg2 = {.hp = 0x1,  // HP_IA1 enabled
-                                         .fds = 1,   // Filtered data enabled
-                                         .hpcf = LIS3DH_AGGRESSIVE,
-                                         .hpm = LIS3DH_NORMAL_WITH_RST}});
+                lis3dh_reg_t{.ctrl_reg2 = {.hp = 0x1,  // HP_IA1 enabled
+                                           .fds = 1,   // Filtered data enabled
+                                           .hpcf = LIS3DH_AGGRESSIVE,
+                                           .hpm = LIS3DH_NORMAL_WITH_RST}});
 
   // Configure CTRL_REG3: Route IA1 interrupt to INT1
   send_to_accel(LIS3DH_CTRL_REG3, lis3dh_reg_t{.ctrl_reg3 = {.not_used_01 = 0,
-                                                           .i1_overrun = 0,
-                                                           .i1_wtm = 0,
-                                                           .i1_321da = 0,
-                                                           .i1_zyxda = 0,
-                                                           .i1_ia2 = 0,
-                                                           .i1_ia1 = 1,
-                                                           .i1_click = 0}});
+                                                             .i1_overrun = 0,
+                                                             .i1_wtm = 0,
+                                                             .i1_321da = 0,
+                                                             .i1_zyxda = 0,
+                                                             .i1_ia2 = 0,
+                                                             .i1_ia1 = 1,
+                                                             .i1_click = 0}});
 
   // Configure CTRL_REG4: Full scale ±2g, High-resolution disabled
   send_to_accel(LIS3DH_CTRL_REG4, lis3dh_reg_t{.ctrl_reg4 = {.sim = 0,
-                                                           .st = 0,
-                                                           .hr = 0,
-                                                           .fs = LIS3DH_2g,
-                                                           .ble = 0,
-                                                           .bdu = 0}});
+                                                             .st = 0,
+                                                             .hr = 0,
+                                                             .fs = LIS3DH_2g,
+                                                             .ble = 0,
+                                                             .bdu = 0}});
 
   // Configure CTRL_REG5: No latching interrupts
   send_to_accel(LIS3DH_CTRL_REG5, lis3dh_reg_t{.ctrl_reg5 = {.d4d_int2 = 0,
-                                                           .lir_int2 = 0,
-                                                           .d4d_int1 = 0,
-                                                           .lir_int1 = 0,
-                                                           .not_used_01 = 0,
-                                                           .fifo_en = 0,
-                                                           .boot = 0}});
+                                                             .lir_int2 = 0,
+                                                             .d4d_int1 = 0,
+                                                             .lir_int1 = 0,
+                                                             .not_used_01 = 0,
+                                                             .fifo_en = 0,
+                                                             .boot = 0}});
 
   // Configure CTRL_REG6: Interrupt polarity (active low)
   send_to_accel(LIS3DH_CTRL_REG6, lis3dh_reg_t{.ctrl_reg6 = {.not_used_01 = 0,
-                                                           .int_polarity = 1,
-                                                           .not_used_02 = 0,
-                                                           .i2_act = 0,
-                                                           .i2_boot = 0,
-                                                           .i2_ia2 = 0,
-                                                           .i2_ia1 = 0,
-                                                           .i2_click = 0}});
+                                                             .int_polarity = 1,
+                                                             .not_used_02 = 0,
+                                                             .i2_act = 0,
+                                                             .i2_boot = 0,
+                                                             .i2_ia2 = 0,
+                                                             .i2_ia1 = 0,
+                                                             .i2_click = 0}});
 
   // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
   send_to_accel(LIS3DH_INT1_THS,
-              lis3dh_reg_t{.int1_ths = {.ths = 1, .not_used_01 = 0}});
+                lis3dh_reg_t{.int1_ths = {.ths = 1, .not_used_01 = 0}});
 
   // Configure INT1_DURATION: Duration = 0.1s
   send_to_accel(LIS3DH_INT1_DURATION,
-              lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
+                lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
 
   // Configure INT1_CFG: Enable XHIE, YHIE, ZHIE with OR logic
   send_to_accel(LIS3DH_INT1_CFG, lis3dh_reg_t{.int1_cfg = {.xlie = 0,
-                                                         .xhie = 1,
-                                                         .ylie = 0,
-                                                         .yhie = 1,
-                                                         .zlie = 0,
-                                                         .zhie = 1,
-                                                         ._6d = 0,
-                                                         .aoi = 0}});
+                                                           .xhie = 1,
+                                                           .ylie = 0,
+                                                           .yhie = 1,
+                                                           .zlie = 0,
+                                                           .zhie = 1,
+                                                           ._6d = 0,
+                                                           .aoi = 0}});
 }
 
 void disableHpf() {
@@ -802,77 +802,77 @@ bool setup_accel(lis3dh_odr_t dataRate, bool lowPower) {
 
   // Configure CTRL_REG1: Enable X, Y, Z axes, ODR = 100Hz
   send_to_accel(LIS3DH_CTRL_REG1,
-              lis3dh_reg_t{.ctrl_reg1 = {.xen = 1,
-                                         .yen = 1,
-                                         .zen = 1,
-                                         .lpen = (uint8_t)lowPower,
-                                         .odr = (uint8_t)dataRate}});
+                lis3dh_reg_t{.ctrl_reg1 = {.xen = 1,
+                                           .yen = 1,
+                                           .zen = 1,
+                                           .lpen = (uint8_t)lowPower,
+                                           .odr = (uint8_t)dataRate}});
 
   _delay_ms(2);  // app note says it takes a few ms to change the ODR
   // this may not be the exact value
 
   // Configure CTRL_REG2: High-pass filter enabled for IA1
-  send_to_accel(LIS3DH_CTRL_REG2,                     // lis3dh_reg_t{.byte = 0});
-              lis3dh_reg_t{.ctrl_reg2 = {.hp = 1,   // HP_IA1 enabled
-                                         .fds = 0,  // Filtered data
-                                         .hpcf = LIS3DH_AGGRESSIVE,
-                                         .hpm = LIS3DH_NORMAL_WITH_RST}});
+  send_to_accel(LIS3DH_CTRL_REG2,  // lis3dh_reg_t{.byte = 0});
+                lis3dh_reg_t{.ctrl_reg2 = {.hp = 1,   // HP_IA1 enabled
+                                           .fds = 0,  // Filtered data
+                                           .hpcf = LIS3DH_AGGRESSIVE,
+                                           .hpm = LIS3DH_NORMAL_WITH_RST}});
 
   // Configure CTRL_REG3: Route IA1 interrupt to INT1
   send_to_accel(LIS3DH_CTRL_REG3,
-              lis3dh_reg_t{.ctrl_reg3 = {.not_used_01 = 0,
-                                         .i1_overrun = 0,
-                                         .i1_wtm = 0,
-                                         .i1_321da = 0,
-                                         .i1_zyxda = 0,
-                                         .i1_ia2 = 0,
-                                         .i1_ia1 = 1,  // set int1 here
-                                         .i1_click = 0}});
+                lis3dh_reg_t{.ctrl_reg3 = {.not_used_01 = 0,
+                                           .i1_overrun = 0,
+                                           .i1_wtm = 0,
+                                           .i1_321da = 0,
+                                           .i1_zyxda = 0,
+                                           .i1_ia2 = 0,
+                                           .i1_ia1 = 1,  // set int1 here
+                                           .i1_click = 0}});
 
   // Configure CTRL_REG4: Full scale ±2g, High-resolution disabled
   send_to_accel(LIS3DH_CTRL_REG4, lis3dh_reg_t{.ctrl_reg4 = {.sim = 0,
-                                                           .st = 0,
-                                                           .hr = 0,
-                                                           .fs = MAGNITUDE,
-                                                           .ble = 0,
-                                                           .bdu = 1}});
+                                                             .st = 0,
+                                                             .hr = 0,
+                                                             .fs = MAGNITUDE,
+                                                             .ble = 0,
+                                                             .bdu = 1}});
 
   // Configure CTRL_REG5: No latching interrupts
   send_to_accel(LIS3DH_CTRL_REG5, lis3dh_reg_t{.ctrl_reg5 = {.d4d_int2 = 0,
-                                                           .lir_int2 = 0,
-                                                           .d4d_int1 = 0,
-                                                           .lir_int1 = 0,
-                                                           .not_used_01 = 0,
-                                                           .fifo_en = 0,
-                                                           .boot = 0}});
+                                                             .lir_int2 = 0,
+                                                             .d4d_int1 = 0,
+                                                             .lir_int1 = 0,
+                                                             .not_used_01 = 0,
+                                                             .fifo_en = 0,
+                                                             .boot = 0}});
 
   // Configure CTRL_REG6: Interrupt polarity (active low)
   send_to_accel(LIS3DH_CTRL_REG6, lis3dh_reg_t{.ctrl_reg6 = {.not_used_01 = 0,
-                                                           .int_polarity = 1,
-                                                           .not_used_02 = 0,
-                                                           .i2_act = 0,
-                                                           .i2_boot = 0,
-                                                           .i2_ia2 = 0,
-                                                           .i2_ia1 = 0,
-                                                           .i2_click = 0}});
+                                                             .int_polarity = 1,
+                                                             .not_used_02 = 0,
+                                                             .i2_act = 0,
+                                                             .i2_boot = 0,
+                                                             .i2_ia2 = 0,
+                                                             .i2_ia1 = 0,
+                                                             .i2_click = 0}});
 
   // Configure INT1_THS: Threshold = 250mg (16 * 15.625mg)
   send_to_accel(LIS3DH_INT1_THS,
-              lis3dh_reg_t{.int1_ths = {.ths = 16, .not_used_01 = 0}});
+                lis3dh_reg_t{.int1_ths = {.ths = 16, .not_used_01 = 0}});
 
   // Configure INT1_DURATION: Duration = 0.1s
   send_to_accel(LIS3DH_INT1_DURATION,
-              lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
+                lis3dh_reg_t{.int1_duration = {.d = 0, .not_used_01 = 0}});
 
   // Configure INT1_CFG: Enable XHIE, YHIE, ZHIE with OR logic
   send_to_accel(LIS3DH_INT1_CFG, lis3dh_reg_t{.int1_cfg = {.xlie = 0,
-                                                         .xhie = 1,
-                                                         .ylie = 0,
-                                                         .yhie = 1,
-                                                         .zlie = 0,
-                                                         .zhie = 1,
-                                                         ._6d = 0,
-                                                         .aoi = 0}});
+                                                           .xhie = 1,
+                                                           .ylie = 0,
+                                                           .yhie = 1,
+                                                           .zlie = 0,
+                                                           .zhie = 1,
+                                                           ._6d = 0,
+                                                           .aoi = 0}});
 
   return true;
 }
