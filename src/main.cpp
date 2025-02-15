@@ -62,15 +62,15 @@
  * @section Macros
  */
 
-#define SAVE_AND_DISABLE_INTERRUPTS()            \
+#define SAVE_AND_DISABLE_INTERRUPTS()               \
   bool _interrupt_was_enabled = SREG & _BV(SREG_I); \
   if (_interrupt_was_enabled) {                     \
-    cli();                                       \
+    cli();                                          \
   }
 
-#define RESTORE_INTERRUPTS() \
+#define RESTORE_INTERRUPTS()    \
   if (_interrupt_was_enabled) { \
-    sei();                   \
+    sei();                      \
   }
 
 /**
@@ -560,8 +560,9 @@ uint16_t get_angle(bool reset) {
   }
 
   if (got_new_read) {
-    s_angle = fxpt_atan2(getFilterValue(s_x_filter), getFilterValue(s_y_filter)) +
-           ACCEL_ANGLE_OFFSET;
+    s_angle =
+        fxpt_atan2(getFilterValue(s_x_filter), getFilterValue(s_y_filter)) +
+        ACCEL_ANGLE_OFFSET;
   }
 
   return s_angle;
