@@ -32,7 +32,7 @@ static constexpr uint8_t
             200, 203, 205, 208, 210, 213, 215, 218, 220, 223, 225, 228, 231,
             233, 236, 239, 241, 244, 247, 249, 252, 255};
 
-uint8_t gammaCorrect(uint8_t brightness) {
+uint8_t gamma_correct(uint8_t brightness) {
 #if USE_PROGMEM
   return pgm_read_byte(&gamma8[brightness]);
 #else
@@ -41,23 +41,21 @@ uint8_t gammaCorrect(uint8_t brightness) {
 }
 
 // bits should be log2 of period
-void smoothInt(uint16_t sample, uint8_t bits, int32_t *filter) {
-  long local_sample = ((long)sample) << 16;
+void smooth_int(uint16_t sample, uint8_t bits, int32_t *filter) {
+  int32_t local_sample = ((int32_t)sample) << 16;
 
   *filter += (local_sample - *filter) >> bits;
 }
 
-int16_t getFilterValue(int32_t filter) {
+int16_t get_filter_value(int32_t filter) {
   return (int16_t)((filter + 0x8000) >> 16);
 }
 
-int32_t setFilterValue(int16_t value) {
-  return ((int32_t)value) << 16;
-}
+int32_t set_filter_value(int16_t value) { return ((int32_t)value) << 16; }
 
-bool countDown(uint32_t *prevTime, uint16_t wait) {
-  if (millis() - (*prevTime) > wait) {
-    (*prevTime) = millis();
+bool count_down(uint32_t *prev_time, uint16_t wait) {
+  if (millis() - (*prev_time) > wait) {
+    (*prev_time) = millis();
     return true;
   } else {
     return false;
@@ -101,3 +99,27 @@ static constexpr uint8_t BITS8[8] = {_BV(0), _BV(1), _BV(2), _BV(3),
 // equivalent to _BV() except the value is a LUT rather than an actual bit shift
 // operation which should be faster
 uint8_t bit_cache(uint8_t b) { return BITS8[b]; }
+
+// useful to get absolute magnitude
+uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
+  x = abs(x);
+  y = abs(y);
+  z = abs(z);
+
+  sort_descending(&x, &y, &z);
+
+  return max(x, (15 * x + 6 * y + 5 * z) >> 4);
+}
+
+uint16_t approx_hypot(int16_t x, int16_t y) {
+  x = abs(x);
+  y = abs(y);
+
+  if (x > y) {
+    y >>= 2;
+  } else {
+    x >>= 2;
+  }
+
+  return x + y;
+}

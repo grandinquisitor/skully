@@ -123,7 +123,7 @@ bool calculate_next_frame(uint8_t brightness[], uint16_t roll, bool click,
 
   // Step 4.  Map from heat cells to LED colors
   for (int j = 0; j < NUM_LEDS; j++) {
-    blendIt(BLEND_MODE, brightness[j], gammaCorrect(s_heat[j]));
+    blendIt(BLEND_MODE, brightness[j], gamma_correct(s_heat[j]));
   }
 
   return false;

@@ -98,18 +98,25 @@ constexpr uint8_t INT_PIN_BM = _BV(PORTD2);
 #define TAP_DETECT_METHOD TAP_DETECT_METHOD_PULSE
 
 #if TAP_DETECT_METHOD == TAP_DETECT_METHOD_CALCULATE
-#define READ_Z
+#define READ_Z true
+#else
+#define READ_Z false
 #endif
+
+// high resolution mode = 12 bits
+// normal mode = 10 bits
+// low power mode = 8 bits
+constexpr uint8_t ACCEL_BIT_RESOLUTION = 10;
 
 /**
  * @section LED port setup
  */
 
-typedef enum { PORTB_ENUM = 0, PORT_C_ENUM = 1, PORT_D_ENUM = 2 } PortIndex;
+typedef enum { PORTB_ENUM = 0, PORTC_ENUM = 1, PORTD_ENUM = 2 } PortIndex;
 
 #define IS_CONTIGUOUS(a, b, c) \
   (((a) + (b) + (c) == 3) && ((a) * (b) * (c) == 0))
-static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORT_C_ENUM, PORT_D_ENUM),
+static_assert(IS_CONTIGUOUS(PORTB_ENUM, PORTC_ENUM, PORTD_ENUM),
               "weird values");
 
 typedef struct {
@@ -118,24 +125,24 @@ typedef struct {
 } LedMapping;
 
 constexpr LedMapping LED_MAP[NUM_LEDS] = {
-    {PORT_D_ENUM, PORTD0},  // PORTD0
-    {PORT_C_ENUM, PORTC1},  // PORTC1
-    {PORT_C_ENUM, PORTC0},  // PORTC0
+    {PORTD_ENUM, PORTD0},  // PORTD0
+    {PORTC_ENUM, PORTC1},  // PORTC1
+    {PORTC_ENUM, PORTC0},  // PORTC0
     {PORTB_ENUM, PORTB5},   // PORTB5
     {PORTB_ENUM, PORTB4},   // PORTB4
     {PORTB_ENUM, PORTB3},   // PORTB3
     {PORTB_ENUM, PORTB2},   // PORTB2
     {PORTB_ENUM, PORTB1},   // PORTB1
     {PORTB_ENUM, PORTB0},   // PORTB0
-    {PORT_D_ENUM, PORTD7},  // PORTD7
-    {PORT_D_ENUM, PORTD6},  // PORTD6
-    {PORT_D_ENUM, PORTD5},  // PORTD5
+    {PORTD_ENUM, PORTD7},  // PORTD7
+    {PORTD_ENUM, PORTD6},  // PORTD6
+    {PORTD_ENUM, PORTD5},  // PORTD5
     {PORTB_ENUM, PORTB7},   // PORTB7
     {PORTB_ENUM, PORTB6},   // PORTB6
-    {PORT_D_ENUM, PORTD4},  // PORTD4
-    {PORT_D_ENUM, PORTD3},  // PORTD3
-    {PORT_C_ENUM, PORTC3},  // PORTC3
-    {PORT_C_ENUM, PORTC2}   // PORTC2
+    {PORTD_ENUM, PORTD4},  // PORTD4
+    {PORTD_ENUM, PORTD3},  // PORTD3
+    {PORTC_ENUM, PORTC3},  // PORTC3
+    {PORTC_ENUM, PORTC2}   // PORTC2
 };
 
 constexpr uint8_t _make_bitmap(PortIndex pi) {
@@ -149,16 +156,16 @@ constexpr uint8_t _make_bitmap(PortIndex pi) {
 }
 
 constexpr uint8_t PORT_B_MASK = _make_bitmap(PORTB_ENUM);
-constexpr uint8_t PORT_C_MASK = _make_bitmap(PORT_C_ENUM);
-constexpr uint8_t PORT_D_MASK = _make_bitmap(PORT_D_ENUM);
+constexpr uint8_t PORT_C_MASK = _make_bitmap(PORTC_ENUM);
+constexpr uint8_t PORT_D_MASK = _make_bitmap(PORTD_ENUM);
 
 /**
  * @section global variables
  */
 uint8_t g_timeslice[3][8] = {0};
 uint8_t *g_timeslice_b = g_timeslice[PORTB_ENUM];
-uint8_t *g_timeslice_c = g_timeslice[PORT_C_ENUM];
-uint8_t *g_timeslice_d = g_timeslice[PORT_D_ENUM];
+uint8_t *g_timeslice_c = g_timeslice[PORTC_ENUM];
+uint8_t *g_timeslice_d = g_timeslice[PORTD_ENUM];
 
 volatile uint8_t g_tick = 0;
 volatile uint8_t g_bitpos = 0;
@@ -496,13 +503,8 @@ int16_t g_x_acceleration = 0;
 int16_t g_y_acceleration = 0;
 int16_t g_z_acceleration = 0;
 
-// high resolution = 12 bits
-// normal mode = 10 bits
-// low power mode = 8 bits
-constexpr uint8_t RESOLUTION = 10;
-
 void update_acceleration() {
-#ifdef READ_Z
+#if READ_Z
   constexpr uint8_t NUM_BYTES = 6;
 #else
   constexpr uint8_t NUM_BYTES = 4;
@@ -511,22 +513,30 @@ void update_acceleration() {
   uint8_t buffer[NUM_BYTES];
   read_region_from_accel(LIS3DH_OUT_X_L, buffer, NUM_BYTES);
 
+#if RESOLUTION == 8
+  g_x_acceleration = (int8_t) buffer[1];
+  g_y_acceleration = (int8_t) buffer[3];
+#if READ_Z
+  g_z_acceleration = (int8_t) buffer[5];
+#endif
+#else
+
   int16_t x, y;
 
   x = (int16_t)buffer[0];
   x |= ((int16_t)buffer[1]) << 8;
   y = (int16_t)buffer[2];
   y |= ((int16_t)buffer[3]) << 8;
-#ifdef READ_Z
+#if READ_Z
   int16_t z = (int16_t)buffer[4];
   z |= ((int16_t)buffer[5]) << 8;
 #endif
 
   // note: assumes 10 bit resolution
-  constexpr uint8_t SHIFT_AMOUNT = 16 - RESOLUTION;
+  constexpr uint8_t SHIFT_AMOUNT = 16 - ACCEL_BIT_RESOLUTION;
   g_x_acceleration = x >> SHIFT_AMOUNT;
   g_y_acceleration = y >> SHIFT_AMOUNT;
-#ifdef READ_Z
+#if READ_Z
   g_z_acceleration = z >> SHIFT_AMOUNT;
 #endif
 #endif
@@ -548,50 +558,27 @@ uint16_t get_angle(bool reset) {
   if (reset) {
     update_acceleration();
     s_accel_counter = millis();  // not strictly necessary
-    s_x_filter = setFilterValue(x_value);
-    s_y_filter = setFilterValue(y_value);
+    s_x_filter = set_filter_value(x_value);
+    s_y_filter = set_filter_value(y_value);
     got_new_read = true;
   } else {
-    if (countDown(&s_accel_counter, GET_ANGLE_FREQ)) {
+    if (count_down(&s_accel_counter, GET_ANGLE_FREQ)) {
       update_acceleration();
-      smoothInt(x_value, 1, &s_x_filter);
-      smoothInt(y_value, 1, &s_y_filter);
+      smooth_int(x_value, 1, &s_x_filter);
+      smooth_int(y_value, 1, &s_y_filter);
       got_new_read = true;
     }
   }
 
   if (got_new_read) {
     s_angle =
-        fxpt_atan2(getFilterValue(s_x_filter), getFilterValue(s_y_filter)) +
+        fxpt_atan2(get_filter_value(s_x_filter), get_filter_value(s_y_filter)) +
         ACCEL_ANGLE_OFFSET;
   }
 
   return s_angle;
 }
 
-// useful to get absolute magnitude
-uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
-  x = abs(x);
-  y = abs(y);
-  z = abs(z);
-
-  sort_descending(&x, &y, &z);
-
-  return max(x, (5 * x + 6 * y + 15 * z) >> 4);
-}
-
-uint16_t approx_hypot(int16_t x, int16_t y) {
-  x = abs(x);
-  y = abs(y);
-
-  if (x > y) {
-    y >>= 2;
-  } else {
-    x >>= 2;
-  }
-
-  return x + y;
-}
 
 bool get_click() {
   if (g_no_accelerometer) {
@@ -603,7 +590,7 @@ bool get_click() {
 
   static uint32_t s_accel_counter = 0;
 
-  if (countDown(&s_accel_counter, GET_CLICK_FREQ)) {
+  if (count_down(&s_accel_counter, GET_CLICK_FREQ)) {
     uint8_t click = 0;  // lis.getClick();
     if (!(click == 0 || !(click & 0x30))) {
       // only necessary to call this if we are using the latching interrupt
