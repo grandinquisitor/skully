@@ -26,7 +26,7 @@ void test_delay();
 
 void showError(uint8_t);
 
-uint16_t getAngle(bool reset);
+uint16_t get_angle(bool reset);
 
 bool getClick();
 
@@ -34,28 +34,28 @@ void configInterrupts();
 
 void disableHpf();
 
-void sendToAccel(uint8_t addr, uint8_t val);
+void send_to_accel(uint8_t addr, uint8_t val);
 
-void clearInterrupt();
+void clear_interrupt();
 
 void goToSleep();
 
 void wakeUp();
 
-bool setupAccel(lis3dh_odr_t, bool);
+bool setup_accel(lis3dh_odr_t, bool);
 
-void readFromAccel(uint8_t addr, uint8_t* output);
+void read_from_accel(uint8_t addr, uint8_t* output);
 
-uint8_t readRegionFromAccel(uint8_t addr, uint8_t* output, uint8_t length);
+uint8_t read_region_from_accel(uint8_t addr, uint8_t* output, uint8_t length);
 
-uint8_t readByteFromAccel(uint8_t addr);
+uint8_t read_byte_from_accel(uint8_t addr);
 
 void setupInterrupt();
 
-bool setupAccelStartup();
+bool setup_accel_startup();
 
-bool setupAccelSleep();
+bool setup_accel_sleep();
 
-bool setupAccelReawaken();
+bool setup_accel_reawake();
 
 #endif // __MAIN_H__
