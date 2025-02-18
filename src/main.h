@@ -36,26 +36,28 @@ void disableHpf();
 
 void send_to_accel(uint8_t addr, uint8_t val);
 
-void clear_interrupt();
+void clear_int1_interrupt();
 
 void go_to_sleep();
-
-void wakeUp();
 
 bool setup_accel(lis3dh_odr_t, bool);
 
 void read_from_accel(uint8_t addr, uint8_t* output);
 
-uint8_t read_region_from_accel(uint8_t addr, uint8_t* output, uint8_t length);
+uint8_t read_from_accel(uint8_t addr, uint8_t* output, uint8_t length);
 
-uint8_t read_byte_from_accel(uint8_t addr);
+uint8_t read_from_accel(uint8_t addr);
 
-void setupInterrupt();
+void setup_interrupt();
 
 bool setup_accel_startup();
 
 bool setup_accel_sleep();
 
 bool setup_accel_reawake();
+
+void send_to_accel(uint8_t addr, lis3dh_reg_t val);
+
+bool send_to_accel_and_verify(uint8_t addr, lis3dh_reg_t val);
 
 #endif // __MAIN_H__

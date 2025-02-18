@@ -93,10 +93,10 @@ bool calculate_next_frame(uint8_t brightness[], uint16_t roll, bool click,
   // left side
   for (int8_t k = NUM_LEDS - 1; k >= 0; --k) {
     if (bitRead(s_direction_register, k)) {
-      uint8_t neighbor1 = decr(k, 1, NUM_LEDS);
+      uint8_t neighbor1 = mod_subtract(k, 1, NUM_LEDS);
       neighbor1 = bitRead(s_direction_register, neighbor1) ? s_heat[neighbor1] : 0;
 
-      uint8_t neighbor2 = decr(k, 2, NUM_LEDS);
+      uint8_t neighbor2 = mod_subtract(k, 2, NUM_LEDS);
       neighbor2 = bitRead(s_direction_register, neighbor2) ? s_heat[neighbor2] : 0;
 
       //      heat[k] = (((uint16_t) neighbor1) + neighbor2 + neighbor2) / 3;
@@ -115,7 +115,7 @@ bool calculate_next_frame(uint8_t brightness[], uint16_t roll, bool click,
     if (random8() <= 160) {
       y = addmod8(bottom_led, y, NUM_LEDS);
     } else {
-      y = decr(bottom_led, y + 1, NUM_LEDS);
+      y = mod_subtract(bottom_led, y + 1, NUM_LEDS);
     }
 
     s_heat[y] = qadd8(s_heat[y], spark_now ? 255 : random8(160, 255));

@@ -212,7 +212,7 @@ void setup() {
     if (setup_accel_startup()) {
       g_no_accelerometer = false;
 #if TAP_DETECT_METHOD == TAP_DETECT_METHOD_PULSE
-      setupInterrupt();
+      setup_interrupt();
 #else
 #error "not implemented"
 #endif
@@ -421,7 +421,7 @@ void go_to_sleep() {
   stop_leds();
   setup_accel_sleep();
   // assumes interrupt handler is already set up
-  while (~PIND & INT_PIN_BM) {
+  while (~PIND & INT_PIN_BM) {  // must wait for the interrupt pin to be clear before sleeping
   }
   sei();
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
@@ -450,8 +450,7 @@ void led_encode_timeslices(uint8_t intensity[]) {
     for (uint8_t bitpos = 0, bitmask = 1; bitpos < 8; bitpos++, bitmask <<= 1) {
       if (intensity[led] & bitmask) {
         // If this bit is set, turn on the LED for this timeslice
-        // TODO: LUT this bit shift
-        uint8_t pin_mask = ~_BV(LED_MAP[led].pin);  // Inverted because LOW = ON
+        uint8_t pin_mask = ~bit_mask_cache(LED_MAP[led].pin);  // Inverted because LOW = ON
 
         g_timeslice[LED_MAP[led].port][bitpos] &= pin_mask;
         // switch (LED_MAP[led].port) {
@@ -511,7 +510,7 @@ void update_acceleration() {
 #endif
 
   uint8_t buffer[NUM_BYTES];
-  read_region_from_accel(LIS3DH_OUT_X_L, buffer, NUM_BYTES);
+  read_from_accel(LIS3DH_OUT_X_L, buffer, NUM_BYTES);
 
 #if RESOLUTION == 8
   g_x_acceleration = (int8_t) buffer[1];
@@ -542,6 +541,9 @@ void update_acceleration() {
 #endif
 }
 
+/**
+ * Compute orientation angle with smoothed accelerometer readings
+ */
 uint16_t get_angle(bool reset) {
   if (g_no_accelerometer) {
     return 0;
@@ -579,7 +581,9 @@ uint16_t get_angle(bool reset) {
   return s_angle;
 }
 
-
+/**
+ * Return true if we've received a tap
+ */
 bool get_click() {
   if (g_no_accelerometer) {
     return true;
@@ -594,7 +598,7 @@ bool get_click() {
     uint8_t click = 0;  // lis.getClick();
     if (!(click == 0 || !(click & 0x30))) {
       // only necessary to call this if we are using the latching interrupt
-      // clear_interrupt();
+      // clear_int1_interrupt();
       return true;
     }
   }
@@ -624,16 +628,6 @@ bool get_click() {
 #else
 #error "invalid tap detect method"
 #endif
-}
-
-inline void send_to_accel(uint8_t addr, lis3dh_reg_t val) {
-  send_to_accel(addr, val.byte);
-}
-
-inline bool sendToAccelAndVerify(uint8_t addr, lis3dh_reg_t val) {
-  send_to_accel(addr, val.byte);
-  uint8_t byteVal = read_byte_from_accel(addr);
-  return byteVal == val.byte;
 }
 
 #if TAP_DETECT_METHOD != TAP_DETECT_METHOD_PULSE && \
@@ -719,7 +713,7 @@ void disableHpf() {
 
 ISR(INT0_vect) { g_got_interrupt = true; }
 
-void setupInterrupt() {
+void setup_interrupt() {
   SAVE_AND_DISABLE_INTERRUPTS();
 
   // Set INT0 to trigger on FALLING EDGE
@@ -766,7 +760,7 @@ bool setup_accel(lis3dh_odr_t dataRate, bool lowPower) {
   _delay_ms(5);  // app note specifies it takes 5ms to boot (and starts in power
                  // down mode)
 
-  if (read_byte_from_accel(LIS3DH_WHO_AM_I) != LIS3DH_ID) {
+  if (read_from_accel(LIS3DH_WHO_AM_I) != LIS3DH_ID) {
     return false;
   }
 
@@ -854,13 +848,29 @@ void send_to_accel(uint8_t addr, uint8_t val) {
   Wire.endTransmission();  // stop transmitting
 }
 
-// read multiple bytes
-uint8_t read_region_from_accel(uint8_t addr, uint8_t *output, uint8_t length) {
+inline void send_to_accel(uint8_t addr, lis3dh_reg_t val) {
+  send_to_accel(addr, val.byte);
+}
+
+inline bool send_to_accel_and_verify(uint8_t addr, lis3dh_reg_t val) {
+  send_to_accel(addr, val.byte);
+  uint8_t byte_val = read_from_accel(addr);
+  return byte_val == val.byte;
+}
+
+
+/**
+ * Read a range of bytes from the accelerometer
+ * 
+ * @return the number of bytes read
+ */
+uint8_t read_from_accel(uint8_t register_addr, uint8_t *output, uint8_t length) {
+  constexpr uint8_t ADDR_AUTO_INCREMENT_BIT = 0x80;
   Wire.beginTransmission(ACCEL_ADDRESS);
   if (length > 1) {
-    addr |= 0x80;  // set auto-increment bit
+    register_addr |= ADDR_AUTO_INCREMENT_BIT;  // set auto-increment bit
   }
-  Wire.write(addr);
+  Wire.write(register_addr);
   uint8_t i = 0;
   if (Wire.endTransmission() != 0) {
     *output = 0;
@@ -876,14 +886,20 @@ uint8_t read_region_from_accel(uint8_t addr, uint8_t *output, uint8_t length) {
   return i;
 }
 
-void read_from_accel(uint8_t addr, uint8_t *output) {
-  read_region_from_accel(addr, output, 1);
+/**
+ * Read a single byte from the accelerometer and set the value
+ */
+void read_from_accel(uint8_t register_addr, uint8_t *output) {
+  read_from_accel(register_addr, output, 1);
 }
 
-uint8_t read_byte_from_accel(uint8_t addr) {
-  uint8_t dataRead;
-  read_from_accel(addr, &dataRead);
-  return dataRead;
+/**
+ * Read a single byte from the accelerometer and return the value
+ */
+uint8_t read_from_accel(uint8_t register_addr) {
+  uint8_t data;
+  read_from_accel(register_addr, &data);
+  return data;
 }
 
-void clear_interrupt() { read_byte_from_accel(LIS3DH_INT1_SRC); }
+void clear_int1_interrupt() { read_from_accel(LIS3DH_INT1_SRC); }

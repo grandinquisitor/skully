@@ -53,6 +53,17 @@ int16_t get_filter_value(int32_t filter) {
 
 int32_t set_filter_value(int16_t value) { return ((int32_t)value) << 16; }
 
+/**
+ * Counts down from a specified wait time and updates the previous time reference.
+ *
+ * This function checks if the elapsed time since `*prev_time` exceeds `wait`.
+ * If it does, `*prev_time` is updated to the current time, and the function returns true.
+ * Otherwise, it returns false.
+ *
+ * @param prev_time Pointer to the previous time reference (in milliseconds).
+ * @param wait The wait time to count down (in milliseconds).
+ * @return True if the wait time has elapsed, false otherwise.
+ */
 bool count_down(uint32_t *prev_time, uint16_t wait) {
   if (millis() - (*prev_time) > wait) {
     (*prev_time) = millis();
@@ -62,11 +73,27 @@ bool count_down(uint32_t *prev_time, uint16_t wait) {
   }
 }
 
-uint8_t decr(uint8_t val, uint8_t mod) {
+/**
+ * Decrements a value within a modulo system, wrapping around if necessary.
+ *
+ * @param val The value to decrement.
+ * @param mod The modulus value defining the range [0, mod - 1].
+ * @return The result of (val - 1) modulo mod, wrapping around to mod - 1 if val
+ * is 0.
+ */
+uint8_t mod_decrement(uint8_t val, uint8_t mod) {
   return (val == 0) ? mod - 1 : val - 1;
 }
 
-uint8_t decr(uint8_t val, uint8_t sub, uint8_t mod) {
+/**
+ * Subtracts a value within a modulo system, wrapping around if necessary.
+ *
+ * @param val The value to subtract from.
+ * @param sub The value to subtract.
+ * @param mod The modulus value defining the range [0, mod - 1].
+ * @return The result of (val - sub) modulo mod, wrapping around if val < sub.
+ */
+uint8_t mod_subtract(uint8_t val, uint8_t sub, uint8_t mod) {
   if (val < sub) {
     return mod - (sub - val);
   } else {
@@ -74,6 +101,16 @@ uint8_t decr(uint8_t val, uint8_t sub, uint8_t mod) {
   }
 }
 
+/**
+ * Sorts three integers in descending order in-place.
+ *
+ * The function ensures that the values pointed to by `a`, `b`, and `c` are
+ * rearranged such that `*a >= *b >= *c` after execution.
+ *
+ * @param a Pointer to the first integer.
+ * @param b Pointer to the second integer.
+ * @param c Pointer to the third integer.
+ */
 void sort_descending(int16_t *a, int16_t *b, int16_t *c) {
   // Swap if necessary to ensure a >= b >= c
   if (*a < *b) {
@@ -96,11 +133,32 @@ void sort_descending(int16_t *a, int16_t *b, int16_t *c) {
 static constexpr uint8_t BITS8[8] = {_BV(0), _BV(1), _BV(2), _BV(3),
                                      _BV(4), _BV(5), _BV(6), _BV(7)};
 
-// equivalent to _BV() except the value is a LUT rather than an actual bit shift
-// operation which should be faster
-uint8_t bit_cache(uint8_t b) { return BITS8[b]; }
+/**
+ * Retrieves a precomputed bitmask from a lookup table (LUT) for a given bit
+ * position.
+ *
+ * This function is equivalent to `_BV()` but uses a lookup table for faster
+ * computation on systems without a native shift-by-n instruction.
+ *
+ * @param bp The bit position (0-7) for which to retrieve the bitmask.
+ * @return The bitmask corresponding to the specified bit position.
+ */
+uint8_t bit_mask_cache(uint8_t bp) { return BITS8[bp]; }
 
-// useful to get absolute magnitude
+/**
+ * Computes an approximate 3D hypotenuse (magnitude) of three integer values.
+ *
+ * This function calculates an approximate magnitude of the vector (x, y, z)
+ * using a fast approximation method.
+ *
+ * @see https://en.wikipedia.org/wiki/Alpha_max_plus_beta_min_algorithm
+ * @note This is an extension of the 2D Alpha max plus beta min algorithm that
+ * does not have a specific name in literature.
+ * @param x The first component of the vector.
+ * @param y The second component of the vector.
+ * @param z The third component of the vector.
+ * @return The approximate magnitude of the vector.
+ */
 uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
   x = abs(x);
   y = abs(y);
@@ -111,6 +169,17 @@ uint16_t approx_hypot(int16_t x, int16_t y, int16_t z) {
   return max(x, (15 * x + 6 * y + 5 * z) >> 4);
 }
 
+/**
+ * Computes an approximate 2D hypotenuse (magnitude) of three integer values.
+ *
+ * This function calculates an approximate magnitude of the vector (x, y) using
+ * a fast approximation method.
+ *
+ * @see https://en.wikipedia.org/wiki/Alpha_max_plus_beta_min_algorithm
+ * @param x The first component of the vector.
+ * @param y The second component of the vector.
+ * @return The approximate magnitude of the vector.
+ */
 uint16_t approx_hypot(int16_t x, int16_t y) {
   x = abs(x);
   y = abs(y);
