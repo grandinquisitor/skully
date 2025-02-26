@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include <Arduino.h>
+
 uint8_t gamma_correct(uint8_t brightness);
 void smooth_int(uint16_t sample, uint8_t bits, int32_t* filter);
 int16_t get_filter_value(int32_t filter);

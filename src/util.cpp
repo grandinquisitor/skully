@@ -1,10 +1,10 @@
 #include "util.h"
 
-#include <Arduino.h>
 #include <avr/pgmspace.h>
+#include <Arduino.h>
 #include <stdint.h>
 
-#define USE_PROGMEM 1
+#define USE_PROGMEM false
 
 static constexpr uint8_t
 #if USE_PROGMEM
